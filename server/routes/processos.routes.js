@@ -1,10 +1,27 @@
 import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeFileSync } from 'node:fs';
 import db, { registrarHistorico, ehSimulacao } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
+import { detalharProcessoNoSei } from '../sei/detail.js';
+
+// Monta a configuração do robô a partir da linha do banco (ou simulação).
+function montarCfg(cfgRow) {
+  if (!cfgRow) return { base_url: process.env.SEI_BASE_URL || '', tipo_documento: 'Despacho', nivel_acesso: 'publico' };
+  return {
+    base_url: cfgRow.base_url,
+    orgao: cfgRow.orgao,
+    unidade: cfgRow.unidade,
+    usuario: cfgRow.usuario,
+    senha: descriptografar(cfgRow.senha_cripto),
+    tipo_documento: cfgRow.tipo_documento,
+    nivel_acesso: cfgRow.nivel_acesso,
+    unidade_destino: cfgRow.unidade_destino,
+  };
+}
 
 const router = Router();
 router.use(exigirLogin);
@@ -114,6 +131,67 @@ router.post('/:id/distribuir', exigirPapel('operador', 'admin'), (req, res) => {
     detalhe: `Distribuído para ${perito.nome}`,
   });
   res.json({ ok: true });
+});
+
+// Busca o conteúdo do processo no SEI (documentos, interessado, tipo,
+// especificação) abrindo o processo e lendo a tela.
+router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+
+  const cfgRow = db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
+  const mock = ehSimulacao();
+  if (!cfgRow && !mock) return res.status(400).json({ erro: 'Cadastre a configuração do SEI primeiro.' });
+
+  let r;
+  try {
+    r = await detalharProcessoNoSei(montarCfg(cfgRow), { processoId: proc.id, numeroSei: proc.numero_sei }, mock);
+  } catch (e) {
+    return res.status(502).json({ erro: e.message, debug: e.debug || null });
+  }
+
+  // Atualiza os dados do processo (só sobrescreve o que veio preenchido).
+  db.prepare(
+    `UPDATE processos SET
+       tipo = COALESCE(?, tipo),
+       interessado = COALESCE(?, interessado),
+       especificacao = COALESCE(?, especificacao),
+       atualizado_em = datetime('now')
+     WHERE id = ?`
+  ).run(r.tipo || null, r.interessado || null, r.especificacao || null, proc.id);
+
+  // Substitui a lista de documentos.
+  if (Array.isArray(r.documentos) && r.documentos.length) {
+    db.prepare('DELETE FROM documentos WHERE processo_id = ?').run(proc.id);
+    const ins = db.prepare('INSERT INTO documentos (processo_id, numero, tipo, data, link_sei) VALUES (?, ?, ?, ?, ?)');
+    const tx = db.transaction((lista) => {
+      for (const d of lista) ins.run(proc.id, d.numero ?? null, d.tipo ?? null, d.data ?? null, d.link_sei ?? null);
+    });
+    tx(r.documentos);
+  }
+
+  // Salva a amostra em arquivo para calibração.
+  if (r.amostra) {
+    try { writeFileSync(join(DIR_COMPROVANTES, 'debug-processo.txt'), r.amostra, 'utf8'); } catch { /* ignora */ }
+  }
+
+  registrarHistorico({
+    processoId: proc.id,
+    usuario: req.usuario,
+    acao: 'detalhado_sei',
+    detalhe: `Conteúdo buscado no SEI (${r.modo}) — ${Array.isArray(r.documentos) ? r.documentos.length : 0} documento(s)`,
+  });
+
+  res.json({
+    ok: true,
+    modo: r.modo,
+    documentos: Array.isArray(r.documentos) ? r.documentos.length : 0,
+    interessado: r.interessado || null,
+    tipo: r.tipo || null,
+    especificacao: r.especificacao || null,
+    amostra: r.amostra || null,
+    debug: r.debug || null,
+  });
 });
 
 // Envia a resposta de volta ao SEI (operador ou admin).

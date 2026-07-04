@@ -452,6 +452,7 @@ function renderAreaDespacho(p, isOper, isPerito) {
 function renderAcoes(p, isOper, isPerito) {
   const acoes = [];
   if (isOper) {
+    acoes.push(`<button class="btn secondary" id="a-detalhar">🔎 Buscar conteúdo no SEI</button>`);
     if (['em_controle', 'distribuido', 'devolvido'].includes(p.status)) {
       acoes.push(`<button class="btn" id="a-distribuir">👤 ${p.perito_id ? 'Redistribuir' : 'Distribuir'} a um perito</button>`);
     }
@@ -494,6 +495,36 @@ function ligarAcoes(p, isOper, isPerito) {
     await api.put('/api/processos/' + p.id, r);
     toast('Processo atualizado');
     recarrega();
+  };
+
+  // Buscar conteúdo no SEI
+  const btnDetalhar = document.getElementById('a-detalhar');
+  if (btnDetalhar) btnDetalhar.onclick = async () => {
+    btnDetalhar.disabled = true;
+    btnDetalhar.textContent = '⏳ Buscando no SEI…';
+    try {
+      const r = await api.post(`/api/processos/${p.id}/detalhar-sei`);
+      const semNada = r.modo === 'sei' && r.documentos === 0 && !r.interessado && !r.tipo && !r.especificacao;
+      if (semNada && (r.amostra || r.debug)) {
+        const amostra = r.amostra
+          ? `<p class="muted" style="margin-top:12px"><b>Copie este texto e mande para o suporte</b> (para calibrar a leitura do conteúdo):</p>
+             <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.amostra)}</textarea>`
+          : '';
+        const img = r.debug ? `<img src="/api/sei/debug/${encodeURIComponent(r.debug)}" style="width:100%;border:1px solid var(--border);border-radius:8px;margin-top:10px" />` : '';
+        await modal({ titulo: 'Abri o processo, mas não reconheci o conteúdo', okLabel: 'Fechar', corpo: `<p>O robô abriu o processo no SEI, mas a tela de detalhes é diferente do padrão.</p>${amostra}${img}` });
+      } else {
+        toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
+      }
+      recarrega();
+    } catch (e) {
+      const debug = e.dados?.debug;
+      if (debug) {
+        await modal({ titulo: 'Não consegui abrir o processo', okLabel: 'Fechar',
+          corpo: `<p>${esc(e.message)}</p><img src="/api/sei/debug/${encodeURIComponent(debug)}" style="width:100%;border:1px solid var(--border);border-radius:8px;margin-top:10px" />` });
+      } else { toast(e.message, true); }
+      btnDetalhar.disabled = false;
+      btnDetalhar.textContent = '🔎 Buscar conteúdo no SEI';
+    }
   };
 
   // Distribuir
