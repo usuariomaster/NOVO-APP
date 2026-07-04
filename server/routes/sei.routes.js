@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import db, { registrarHistorico, ehSimulacao, getConfig, setConfig } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { criptografar, descriptografar } from '../sei/crypto.js';
@@ -22,10 +23,14 @@ router.post('/modo', exigirPapel('admin'), (req, res) => {
   res.json({ simulacao: ehSimulacao() });
 });
 
-// Serve um print de diagnóstico do robô (login/controle) — somente admin.
+// Serve um print/arquivo de diagnóstico do robô — somente admin.
 router.get('/debug/:nome', exigirPapel('admin'), (req, res) => {
   const nome = String(req.params.nome).replace(/[^a-zA-Z0-9._-]/g, '');
-  res.sendFile(join(DIR_DIAG, nome));
+  const caminho = join(DIR_DIAG, nome);
+  if (!existsSync(caminho)) {
+    return res.status(404).json({ erro: 'Diagnóstico ainda não gerado. Rode uma extração primeiro.' });
+  }
+  res.sendFile(caminho);
 });
 
 // ---- Configurações do SEI (credenciais) — somente admin ----

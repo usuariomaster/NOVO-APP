@@ -182,20 +182,49 @@ async function coletarDoFrame(frame) {
   }
 }
 
+// Coleta candidatos de todos os quadros da página.
+async function coletarTodos(page) {
+  let c = [];
+  for (const frame of page.frames()) {
+    c = c.concat(await coletarDoFrame(frame));
+  }
+  return c;
+}
+
+// Clica no menu "Controle de Processos" (usando o link real da tela, que
+// carrega o hash de sessão do SEI). Retorna true se conseguiu clicar.
+async function clicarControle(page) {
+  for (const frame of page.frames()) {
+    try {
+      const link = frame
+        .locator('a[href*="procedimento_controlar"], a:has-text("Controle de Processos"), img[title*="Controle de Processos"]')
+        .first();
+      if (await link.count()) {
+        await link.click({ timeout: 10000 });
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(1200);
+        return true;
+      }
+    } catch { /* tenta o próximo quadro */ }
+  }
+  return false;
+}
+
 // Extrai a lista de processos da tela "Controle de Processos".
+// Importante: NÃO navegamos por URL direta — o SEI rejeita isso (falta o
+// hash de sessão) e volta ao login. Após o login o SEI já mostra o
+// "Controle de Processos"; se não for o caso, clicamos no menu.
 async function extrairControleProcessos(page, baseUrl, cfg) {
-  const url = cfg.unidade
-    ? `${baseUrl}/controlador.php?acao=procedimento_controlar&infra_unidade_atual=${cfg.unidade}`
-    : `${baseUrl}/controlador.php?acao=procedimento_controlar`;
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(1500);
 
   // A lista pode estar na página ou dentro de um quadro (iframe).
-  // Procuramos em todos os frames.
-  let candidatos = [];
-  for (const frame of page.frames()) {
-    candidatos = candidatos.concat(await coletarDoFrame(frame));
+  let candidatos = await coletarTodos(page);
+
+  // Se não achou nada, tenta abrir o menu "Controle de Processos".
+  if (candidatos.length === 0) {
+    await clicarControle(page);
+    candidatos = await coletarTodos(page);
   }
 
   // Prioriza os que vieram por link de "trabalhar/visualizar"; se não houver
