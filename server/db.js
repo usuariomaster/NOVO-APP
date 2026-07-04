@@ -127,6 +127,9 @@ function garantirColuna(tabela, nome, ddl) {
 }
 // Comprovante (print) do lançamento automático do despacho no SEI
 garantirColuna('despachos', 'comprovante', 'comprovante TEXT');
+// Conteúdo (texto) e arquivo baixado de cada documento do SEI
+garantirColuna('documentos', 'conteudo', 'conteudo TEXT');
+garantirColuna('documentos', 'arquivo', 'arquivo TEXT');
 // Configuração da escrita automática no SEI
 garantirColuna('sei_config', 'escrita', 'escrita INTEGER NOT NULL DEFAULT 1');
 garantirColuna('sei_config', 'tipo_documento', "tipo_documento TEXT NOT NULL DEFAULT 'Despacho'");

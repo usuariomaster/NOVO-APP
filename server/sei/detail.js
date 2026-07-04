@@ -32,31 +32,89 @@ async function abrirProcesso(page, baseUrl, numeroSei) {
   await page.waitForTimeout(1500);
 }
 
-// Coleta os documentos a partir da árvore do processo (quadro "árvore").
-async function coletarDocumentos(page, numeroSei) {
-  const docs = [];
-  const vistos = new Set();
+// Localiza o quadro (frame) da árvore de documentos do processo.
+function acharArvore(page) {
   for (const frame of page.frames()) {
-    const ehArvore = /arvore/i.test(frame.name() + ' ' + frame.url());
-    if (!ehArvore) continue;
-    let itens = [];
-    try {
-      itens = await frame.$$eval('a', (els) =>
-        els
-          .map((el) => ({ t: (el.textContent || '').trim(), h: el.getAttribute('href') || '' }))
-          .filter((x) => x.t)
-      );
-    } catch { /* ignora */ }
-    for (const it of itens) {
-      // Ignora o próprio processo e itens vazios/repetidos.
-      if (!it.t || it.t === numeroSei || vistos.has(it.t)) continue;
-      // Descarta rótulos genéricos da árvore.
-      if (/^(consultar|gerar|incluir|processo)/i.test(it.t)) continue;
-      vistos.add(it.t);
-      docs.push({ numero: null, tipo: it.t, link_sei: it.h });
+    if (/arvore/i.test(frame.name() + ' ' + frame.url())) return frame;
+  }
+  return null;
+}
+
+// Coleta os documentos a partir da árvore do processo, filtrando o lixo
+// (nomes de setores, "Fechar", "Link para Acesso Direto", número do processo).
+async function coletarDocumentos(page) {
+  const arvore = acharArvore(page);
+  if (!arvore) return [];
+  let itens = [];
+  try {
+    itens = await arvore.$$eval('a', (els) =>
+      els
+        .map((el) => ({ t: (el.textContent || '').trim(), h: el.href || '' }))
+        .filter((x) => x.t)
+    );
+  } catch {
+    return [];
+  }
+
+  // Cada documento tem um número de 6 a 9 dígitos (ex.: 0283965).
+  // O número do processo tem "/" — descartamos. Rótulos sem número
+  // (setores, "Fechar") também são descartados.
+  const porNumero = new Map();
+  for (const it of itens) {
+    if (/^(fechar|link para acesso direto)$/i.test(it.t)) continue;
+    if (it.t.includes('/')) continue; // número do processo
+    const m = it.t.match(/(\d{6,9})/);
+    if (!m) continue;
+    const numero = m[1];
+    const tipo = it.t.replace(/\(?\b\d{6,9}\b\)?/, '').replace(/[()]/g, '').trim();
+    const anterior = porNumero.get(numero);
+    // Mantém a versão com o nome (tipo) mais descritivo.
+    if (!anterior || tipo.length > (anterior._tipoLen || 0)) {
+      porNumero.set(numero, {
+        numero,
+        tipo: tipo || 'Documento',
+        _tipoLen: tipo.length,
+        link_sei: it.h && /^https?:/i.test(it.h) ? it.h : '',
+      });
     }
   }
-  return docs.slice(0, 200);
+  return [...porNumero.values()].map(({ _tipoLen, ...d }) => d);
+}
+
+// Abre o primeiro documento e captura uma amostra da tela do documento,
+// para calibrar a leitura de conteúdo (texto do despacho / PDF).
+async function amostraDocumento(page) {
+  const arvore = acharArvore(page);
+  if (!arvore) return null;
+  try {
+    // clica no primeiro link que tenha número de documento
+    const link = arvore.locator('a').filter({ hasText: /\d{6,9}/ }).first();
+    if (!(await link.count())) return null;
+    await link.click({ timeout: 10000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+  } catch {
+    return null;
+  }
+  // coleta texto + fontes de PDF (embed/object/iframe) de todos os quadros
+  const partes = [];
+  for (const frame of page.frames()) {
+    try {
+      const info = await frame.evaluate(() => {
+        const txt = (document.body ? document.body.innerText : '').trim().slice(0, 1200);
+        const srcs = [];
+        document.querySelectorAll('embed,object,iframe').forEach((e) => {
+          const s = e.getAttribute('src') || e.getAttribute('data') || '';
+          if (s) srcs.push(s);
+        });
+        return { txt, srcs };
+      });
+      if (info.txt || info.srcs.length) {
+        partes.push(`--- quadro: ${frame.url().slice(0, 90)} ---\nTEXTO:\n${info.txt}\nPDF/SRC:\n${info.srcs.join('\n')}`);
+      }
+    } catch { /* ignora */ }
+  }
+  return partes.join('\n\n').slice(0, 8000);
 }
 
 // Tenta ler interessado/tipo/especificação a partir do texto das telas.
@@ -125,11 +183,13 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
     page = auth.page;
     await abrirProcesso(page, auth.baseUrl, dados.numeroSei);
 
-    const documentos = await coletarDocumentos(page, dados.numeroSei);
+    const documentos = await coletarDocumentos(page);
     const meta = await coletarMetadados(page);
     const amostra = await coletarAmostra(page);
     const debug = await salvarDiagnostico(page, `debug-processo`);
-    return { modo: 'sei', ...meta, documentos, amostra, debug };
+    // Abre um documento e captura como o SEI mostra o conteúdo (calibração).
+    const amostraDoc = await amostraDocumento(page);
+    return { modo: 'sei', ...meta, documentos, amostra, amostraDoc, debug };
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-processo-erro');
     throw e;

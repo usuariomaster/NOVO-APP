@@ -170,10 +170,11 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     tx(r.documentos);
   }
 
-  // Salva a amostra em arquivo para calibração.
-  if (r.amostra) {
-    try { writeFileSync(join(DIR_COMPROVANTES, 'debug-processo.txt'), r.amostra, 'utf8'); } catch { /* ignora */ }
-  }
+  // Salva amostras em arquivo para calibração remota.
+  try {
+    if (r.amostra) writeFileSync(join(DIR_COMPROVANTES, 'debug-processo.txt'), r.amostra, 'utf8');
+    if (r.amostraDoc) writeFileSync(join(DIR_COMPROVANTES, 'debug-documento.txt'), r.amostraDoc, 'utf8');
+  } catch { /* ignora */ }
 
   registrarHistorico({
     processoId: proc.id,
