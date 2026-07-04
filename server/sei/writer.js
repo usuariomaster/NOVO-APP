@@ -131,6 +131,17 @@ export async function lancarDespachoNoSei(cfg, dados, mock) {
     comprovante = await print(editorPage, dados.processoId, '2-despacho');
     await editorPage.close().catch(() => {});
 
+    // 6b) Assina o documento com a senha do SEI (assinatura eletrônica válida).
+    if (cfg.assinar !== false) {
+      try {
+        await assinarDocumento(page, cfg);
+        log('Documento assinado no SEI');
+        comprovante = await print(page, dados.processoId, '2b-assinado');
+      } catch (e) {
+        log(`Aviso: não consegui assinar automaticamente (${e.message})`);
+      }
+    }
+
     // 7) (Opcional) Envia o processo de volta para a unidade de destino.
     if (cfg.unidade_destino) {
       const visEnv = frameVis(page);
@@ -161,6 +172,52 @@ export async function lancarDespachoNoSei(cfg, dados, mock) {
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+// Assina o documento recém-criado usando a senha do SEI (assinatura
+// eletrônica do SEI). Procura o botão "Assinar Documento", preenche o
+// cargo/função (se informado) e a senha, e confirma.
+async function assinarDocumento(page, cfg) {
+  // 1) Clica em "Assinar Documento" (na barra do documento).
+  let clicou = false;
+  for (const f of page.frames()) {
+    try {
+      const btn = f
+        .locator('a[href*="documento_assinar"], img[title*="Assinar Documento"], a:has-text("Assinar Documento")')
+        .first();
+      if (await btn.count()) { await btn.click({ timeout: 15000 }); clicou = true; break; }
+    } catch { /* tenta o próximo quadro */ }
+  }
+  if (!clicou) throw new Error('botão Assinar não encontrado');
+
+  // O SEI abre a tela de assinatura (pode ser em popup).
+  await page.waitForTimeout(1500);
+  const ctx = page.context();
+  const popup = ctx.pages().find((p) => /assinar/i.test(p.url()) && p !== page);
+  const alvo = popup || page;
+  await alvo.waitForLoadState('domcontentloaded').catch(() => {});
+
+  // 2) Preenche cargo/função (se houver e configurado) e a senha.
+  const frames = [alvo, ...alvo.frames()];
+  for (const f of frames) {
+    try {
+      if (cfg.cargo) {
+        const sel = f.locator('#selCargoFuncao, select[name*="Cargo"], select[id*="Cargo"]').first();
+        if (await sel.count()) await sel.selectOption({ label: cfg.cargo }).catch(() => {});
+      }
+      const senhaCampo = f.locator('#pwdSenhaAssinatura, #pwdSenha, input[type="password"]').first();
+      if (await senhaCampo.count()) {
+        await senhaCampo.fill(cfg.senha);
+        const ok = f.locator('#sbmAssinar, input[value*="Assinar"], button:has-text("Assinar"), a[onclick*="assinar"]').first();
+        if (await ok.count()) {
+          await ok.click({ timeout: 15000 });
+          await page.waitForTimeout(2000);
+          return true;
+        }
+      }
+    } catch { /* tenta o próximo quadro */ }
+  }
+  throw new Error('campo de senha da assinatura não encontrado');
 }
 
 function montarHtmlDespacho(dados) {

@@ -73,7 +73,7 @@ function modal({ titulo, corpo, okLabel = 'Confirmar', okClasse = 'btn' }) {
     // Não fecha ao clicar fora, para não perder o que já foi digitado.
     root.querySelector('[data-ok]').onclick = () => {
       const dados = {};
-      root.querySelectorAll('[name]').forEach((i) => (dados[i.name] = i.value));
+      root.querySelectorAll('[name]').forEach((i) => (dados[i.name] = i.type === 'checkbox' ? i.checked : i.value));
       fechar(dados);
     };
     const first = root.querySelector('input, select, textarea');
@@ -1167,10 +1167,12 @@ async function renderConfigSei() {
             <option value="restrito">Restrito</option>
           </select></div>
         </div>
-        <div class="field"><label>Enviar processo à unidade (opcional)</label><input name="unidade_destino" placeholder="ex.: SEMUS ou sigla da unidade de destino"></div>`,
+        <div class="field"><label>Enviar processo à unidade (opcional)</label><input name="unidade_destino" placeholder="ex.: SEMUS ou sigla da unidade de destino"></div>
+        <div class="field"><label><input type="checkbox" name="assinar" checked style="width:auto"> Assinar o despacho no SEI automaticamente (com a senha do SEI)</label></div>
+        <div class="field"><label>Cargo/Função para assinatura (se o SEI pedir)</label><input name="cargo" placeholder="ex.: Perito Médico"></div>`,
     });
     if (!r) return;
-    try { await api.post('/api/sei/config', { ...r, padrao: 1 }); toast('Configuração salva'); renderConfigSei(); }
+    try { await api.post('/api/sei/config', { ...r, padrao: 1, assinar: !!r.assinar }); toast('Configuração salva'); renderConfigSei(); }
     catch (e) { toast(e.message, true); }
   };
   document.querySelectorAll('[data-del]').forEach((b) => {

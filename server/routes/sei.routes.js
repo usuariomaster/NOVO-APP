@@ -38,7 +38,7 @@ router.get('/config', exigirPapel('admin'), (req, res) => {
   const configs = db
     .prepare(
       `SELECT id, apelido, base_url, orgao, unidade, usuario, padrao,
-              escrita, tipo_documento, nivel_acesso, unidade_destino, criado_em
+              escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo, criado_em
        FROM sei_config ORDER BY padrao DESC, apelido`
     )
     .all();
@@ -48,7 +48,7 @@ router.get('/config', exigirPapel('admin'), (req, res) => {
 router.post('/config', exigirPapel('admin'), (req, res) => {
   const {
     apelido, base_url, orgao, unidade, usuario, senha, padrao,
-    escrita, tipo_documento, nivel_acesso, unidade_destino,
+    escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo,
   } = req.body || {};
   if (!apelido || !base_url || !usuario || !senha) {
     return res.status(400).json({ erro: 'Informe apelido, URL base, usuário e senha' });
@@ -58,8 +58,8 @@ router.post('/config', exigirPapel('admin'), (req, res) => {
     .prepare(
       `INSERT INTO sei_config
          (apelido, base_url, orgao, unidade, usuario, senha_cripto, padrao,
-          escrita, tipo_documento, nivel_acesso, unidade_destino)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       apelido.trim(),
@@ -72,7 +72,9 @@ router.post('/config', exigirPapel('admin'), (req, res) => {
       escrita === false ? 0 : 1,
       (tipo_documento || 'Despacho').trim(),
       (nivel_acesso || 'publico').trim(),
-      unidade_destino || null
+      unidade_destino || null,
+      assinar === false ? 0 : 1,
+      cargo || null
     );
   res.status(201).json({ id: info.lastInsertRowid });
 });

@@ -15,6 +15,8 @@ function montarCfg(cfgRow) {
     tipo_documento: cfgRow.tipo_documento,
     nivel_acesso: cfgRow.nivel_acesso,
     unidade_destino: cfgRow.unidade_destino,
+    assinar: cfgRow.assinar !== 0,
+    cargo: cfgRow.cargo,
   };
 }
 

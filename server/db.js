@@ -200,6 +200,9 @@ garantirColuna('sei_config', 'escrita', 'escrita INTEGER NOT NULL DEFAULT 1');
 garantirColuna('sei_config', 'tipo_documento', "tipo_documento TEXT NOT NULL DEFAULT 'Despacho'");
 garantirColuna('sei_config', 'nivel_acesso', "nivel_acesso TEXT NOT NULL DEFAULT 'publico'");
 garantirColuna('sei_config', 'unidade_destino', 'unidade_destino TEXT');
+// Assinatura nativa do SEI (assina o despacho com a senha do SEI)
+garantirColuna('sei_config', 'assinar', 'assinar INTEGER NOT NULL DEFAULT 1');
+garantirColuna('sei_config', 'cargo', 'cargo TEXT');
 
 export function registrarHistorico({ processoId, usuario, acao, detalhe }) {
   db.prepare(
