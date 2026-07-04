@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import db, { registrarHistorico } from '../db.js';
+import db, { registrarHistorico, ehSimulacao } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
@@ -128,7 +128,7 @@ router.post('/:id/enviar-sei', exigirPapel('operador', 'admin'), async (req, res
   if (!despacho?.texto) return res.status(400).json({ erro: 'Não há despacho aprovado para lançar no SEI' });
 
   const cfgRow = db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
-  const mock = String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
+  const mock = ehSimulacao();
   if (!cfgRow && !mock) {
     return res.status(400).json({ erro: 'Cadastre a configuração do SEI antes de lançar o despacho.' });
   }
@@ -155,7 +155,7 @@ router.post('/:id/enviar-sei', exigirPapel('operador', 'admin'), async (req, res
       numeroSei: proc.numero_sei,
       texto: despacho.texto,
       conclusao: despacho.conclusao,
-    });
+    }, mock);
   } catch (e) {
     registrarHistorico({
       processoId: proc.id,

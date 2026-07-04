@@ -13,9 +13,30 @@
 // ponta sem credenciais.
 // ============================================================
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-export const MOCK = () => String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DIR_DIAG = join(__dirname, '..', '..', 'data', 'comprovantes');
+fs.mkdirSync(DIR_DIAG, { recursive: true });
+
 export const HEADFUL = () => String(process.env.SEI_HEADFUL ?? 'false').toLowerCase() === 'true';
+
+// Salva um print + o HTML da página para diagnóstico remoto.
+// Retorna o nome do arquivo de imagem (ou null).
+export async function salvarDiagnostico(page, nome) {
+  try {
+    const png = `${nome}.png`;
+    await page.screenshot({ path: join(DIR_DIAG, png), fullPage: true });
+    try {
+      const html = await page.content();
+      fs.writeFileSync(join(DIR_DIAG, `${nome}.html`), html, 'utf8');
+    } catch { /* ignora */ }
+    return png;
+  } catch {
+    return null;
+  }
+}
 
 // Seletores do SEI 4.x — centralizados para facilitar o ajuste caso a
 // instalação de Nova Iguaçu use um layout/tema diferente.
@@ -23,7 +44,7 @@ export const SEL = {
   loginUsuario: '#txtUsuario',
   loginSenha: '#pwdSenha',
   loginOrgao: '#selOrgao',
-  loginBotao: '#sbmAcessar, #Acessar, button[type="submit"], input[type="submit"]',
+  loginBotao: '#sbmLogin, #sbmAcessar, #Acessar, button[type="submit"], input[type="submit"]',
   buscaRapida: '#txtPesquisaRapida',
   frameArvore: 'ifrArvore',
   frameVisualizacao: 'ifrVisualizacao',
@@ -128,7 +149,10 @@ export async function autenticar(browser, cfg) {
 
   // Se ainda houver o campo de senha, o login falhou.
   if (await page.$(SEL.loginSenha)) {
-    throw new Error('Falha no login do SEI — verifique usuário, senha e órgão.');
+    const debug = await salvarDiagnostico(page, 'debug-login');
+    const err = new Error('Falha no login do SEI — verifique usuário, senha e órgão.');
+    err.debug = debug;
+    throw err;
   }
   return { context, page, baseUrl };
 }
@@ -171,18 +195,26 @@ async function extrairControleProcessos(page, baseUrl, cfg) {
 
 // API pública: extrai os processos usando a configuração informada.
 // cfg = { base_url, orgao, unidade, usuario, senha, apelido }
-export async function extrairProcessos(cfg) {
-  if (MOCK()) {
+// mock = true usa dados de exemplo (não acessa o SEI).
+export async function extrairProcessos(cfg, mock) {
+  if (mock) {
     // Simula latência de rede
     await new Promise((r) => setTimeout(r, 400));
     return { modo: 'simulacao', processos: processosDeExemplo() };
   }
 
   const browser = await abrirNavegador();
+  let page = null;
   try {
-    const { page, baseUrl } = await autenticar(browser, cfg);
-    const processos = await extrairControleProcessos(page, baseUrl, cfg);
-    return { modo: 'sei', processos };
+    const auth = await autenticar(browser, cfg);
+    page = auth.page;
+    const processos = await extrairControleProcessos(page, auth.baseUrl, cfg);
+    // Guarda um print do "Controle de Processos" para conferência/calibração.
+    const debug = await salvarDiagnostico(page, 'debug-controle');
+    return { modo: 'sei', processos, debug };
+  } catch (e) {
+    if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-extracao');
+    throw e;
   } finally {
     await browser.close();
   }

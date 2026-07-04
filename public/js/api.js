@@ -12,6 +12,7 @@ async function req(metodo, url, corpo) {
     const msg = dados?.erro || `Erro ${resp.status}`;
     const err = new Error(msg);
     err.status = resp.status;
+    err.dados = dados;
     throw err;
   }
   return dados;

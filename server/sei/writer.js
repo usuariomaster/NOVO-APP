@@ -15,7 +15,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { MOCK, SEL, abrirNavegador, autenticar } from './scraper.js';
+import { SEL, abrirNavegador, autenticar } from './scraper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dirComprovantes = join(__dirname, '..', '..', 'data', 'comprovantes');
@@ -38,11 +38,11 @@ async function print(page, id, passo) {
 
 // dados = { numeroSei, texto, conclusao }
 // cfg   = { base_url, orgao, usuario, senha, tipo_documento, nivel_acesso, unidade_destino, escrita }
-export async function lancarDespachoNoSei(cfg, dados) {
+export async function lancarDespachoNoSei(cfg, dados, mock) {
   const passos = [];
   const log = (m) => passos.push(m);
 
-  if (MOCK()) {
+  if (mock) {
     await new Promise((r) => setTimeout(r, 500));
     const nome = `proc-${dados.processoId}-simulado.txt`;
     writeFileSync(

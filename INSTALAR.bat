@@ -5,6 +5,7 @@ setlocal enableextensions enabledelayedexpansion
 
 set "BASE=%USERPROFILE%\SisPericia"
 set "APP=%BASE%\app"
+set "TMP=%BASE%\_tmp"
 set "ZIP=%TEMP%\sispericia.zip"
 set "URL=https://codeload.github.com/usuariomaster/NOVO-APP/zip/refs/heads/claude/sei-dispatch-system-7mvzei"
 
@@ -25,39 +26,44 @@ if errorlevel 1 (
   exit /b
 )
 
-rem --- Se ja estiver instalado, apenas inicia ---
-if exist "%APP%\node_modules" goto iniciar
-
-echo Baixando o sistema pela primeira vez... aguarde.
+rem --- Baixa a versao mais recente do sistema ---
+echo Buscando a versao mais recente... aguarde.
 curl -L -o "%ZIP%" "%URL%"
-if errorlevel 1 goto erro_download
-if not exist "%ZIP%" goto erro_download
+if errorlevel 1 goto sem_internet
+if not exist "%ZIP%" goto sem_internet
 
-echo Extraindo os arquivos...
-if exist "%BASE%\_tmp" rmdir /s /q "%BASE%\_tmp"
-mkdir "%BASE%\_tmp"
-tar -xf "%ZIP%" -C "%BASE%\_tmp"
+if exist "%TMP%" rmdir /s /q "%TMP%"
+mkdir "%TMP%"
+tar -xf "%ZIP%" -C "%TMP%"
 if errorlevel 1 goto erro_extrair
 
 set "SRC="
-for /d %%D in ("%BASE%\_tmp\*") do set "SRC=%%D"
+for /d %%D in ("%TMP%\*") do set "SRC=%%D"
 if not defined SRC goto erro_extrair
 
-if exist "%APP%" rmdir /s /q "%APP%"
-move "!SRC!" "%APP%" >nul
-rmdir /s /q "%BASE%\_tmp" 2>nul
+if not exist "%APP%" mkdir "%APP%"
+rem Atualiza os arquivos do sistema, PRESERVANDO seus dados e os componentes:
+robocopy "!SRC!" "%APP%" /MIR /XD node_modules data /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto erro_copia
+rmdir /s /q "%TMP%" 2>nul
 del "%ZIP%" >nul 2>nul
 
-echo.
-echo Instalando os componentes... isso pode levar alguns minutos.
-echo (Um bom momento para um cafe.)
-echo.
 cd /d "%APP%"
-call npm install
-if errorlevel 1 goto erro_install
 
-:iniciar
-cd /d "%APP%"
+rem --- Instala componentes na primeira vez ---
+if not exist "node_modules" (
+  echo.
+  echo Instalando componentes pela primeira vez... pode levar alguns minutos.
+  echo (Um bom momento para um cafe.)
+  echo.
+  call npm install
+  if errorlevel 1 goto erro_install
+)
+
+rem --- Garante o navegador do robo do SEI ---
+echo Verificando o navegador do robo...
+call npx --yes playwright install chromium
+
 echo.
 echo ============================================================
 echo   Pronto! O navegador vai abrir sozinho em instantes.
@@ -73,7 +79,7 @@ call npm start
 pause
 exit /b
 
-:erro_download
+:sem_internet
 echo.
 echo [ERRO] Nao consegui baixar o sistema. Verifique a conexao com a internet e tente de novo.
 pause
@@ -82,6 +88,12 @@ exit /b
 :erro_extrair
 echo.
 echo [ERRO] Nao consegui extrair os arquivos.
+pause
+exit /b
+
+:erro_copia
+echo.
+echo [ERRO] Nao consegui atualizar os arquivos do sistema.
 pause
 exit /b
 

@@ -1,11 +1,32 @@
 import { Router } from 'express';
-import db, { registrarHistorico } from '../db.js';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import db, { registrarHistorico, ehSimulacao, getConfig, setConfig } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { criptografar, descriptografar } from '../sei/crypto.js';
 import { extrairProcessos } from '../sei/scraper.js';
 
 const router = Router();
 router.use(exigirLogin);
+
+const DIR_DIAG = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'comprovantes');
+
+// ---- Modo de operação (simulação x SEI real) ----
+router.get('/modo', (req, res) => {
+  res.json({ simulacao: ehSimulacao(), travadoPorEnv: process.env.SEI_MOCK !== undefined && process.env.SEI_MOCK !== '' });
+});
+
+router.post('/modo', exigirPapel('admin'), (req, res) => {
+  const { simulacao } = req.body || {};
+  setConfig('modo_simulacao', simulacao ? '1' : '0');
+  res.json({ simulacao: ehSimulacao() });
+});
+
+// Serve um print de diagnóstico do robô (login/controle) — somente admin.
+router.get('/debug/:nome', exigirPapel('admin'), (req, res) => {
+  const nome = String(req.params.nome).replace(/[^a-zA-Z0-9._-]/g, '');
+  res.sendFile(join(DIR_DIAG, nome));
+});
 
 // ---- Configurações do SEI (credenciais) — somente admin ----
 router.get('/config', exigirPapel('admin'), (req, res) => {
@@ -63,7 +84,7 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
     ? db.prepare('SELECT * FROM sei_config WHERE id = ?').get(config_id)
     : db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
 
-  const mock = String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
+  const mock = ehSimulacao();
   if (!cfgRow && !mock) {
     return res.status(400).json({ erro: 'Nenhuma configuração de SEI cadastrada. Cadastre em Configuração do SEI.' });
   }
@@ -81,9 +102,9 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
 
   let resultado;
   try {
-    resultado = await extrairProcessos(cfg);
+    resultado = await extrairProcessos(cfg, mock);
   } catch (e) {
-    return res.status(502).json({ erro: `Erro ao acessar o SEI: ${e.message}` });
+    return res.status(502).json({ erro: `Erro ao acessar o SEI: ${e.message}`, debug: e.debug || null });
   }
 
   // Persiste: insere novos, ignora já existentes (por numero_sei)
@@ -128,7 +149,7 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
   });
   tx(resultado.processos);
 
-  res.json({ modo: resultado.modo, total: resultado.processos.length, novos, ignorados });
+  res.json({ modo: resultado.modo, total: resultado.processos.length, novos, ignorados, debug: resultado.debug || null });
 });
 
 export default router;

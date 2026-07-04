@@ -95,6 +95,27 @@ CREATE INDEX IF NOT EXISTS idx_proc_perito ON processos(perito_id);
 CREATE INDEX IF NOT EXISTS idx_hist_proc ON historico(processo_id);
 `);
 
+// Configurações gerais (chave/valor) — ex.: modo simulação x SEI real
+db.exec(`CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)`);
+
+export function getConfig(chave, padrao = null) {
+  const r = db.prepare('SELECT valor FROM configuracoes WHERE chave = ?').get(chave);
+  return r ? r.valor : padrao;
+}
+export function setConfig(chave, valor) {
+  db.prepare(
+    `INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`
+  ).run(chave, String(valor));
+}
+// true = usa dados de exemplo; false = acessa o SEI real.
+// A variável de ambiente SEI_MOCK, se definida, tem prioridade.
+export function ehSimulacao() {
+  const env = process.env.SEI_MOCK;
+  if (env !== undefined && env !== '') return String(env).toLowerCase() === 'true';
+  return getConfig('modo_simulacao', '1') === '1';
+}
+
 // ------------------------------------------------------------
 // Migrações incrementais (adiciona colunas se ainda não existem)
 // ------------------------------------------------------------

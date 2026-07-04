@@ -283,7 +283,19 @@ async function extrairDoSei() {
     toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);
     carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value);
   } catch (err) {
-    toast(err.message, true);
+    // Se o robô devolveu um print do que viu (falha no SEI real), mostra.
+    const debug = err.dados?.debug;
+    if (debug) {
+      await modal({
+        titulo: 'O robô não conseguiu concluir',
+        okLabel: 'Fechar',
+        corpo: `<p>${esc(err.message)}</p>
+          <p class="muted">Abaixo está exatamente o que o robô viu na tela do SEI. Se precisar de ajuste, mande este print para o suporte.</p>
+          <img src="/api/sei/debug/${encodeURIComponent(debug)}" style="width:100%;border:1px solid var(--border);border-radius:8px" />`,
+      });
+    } else {
+      toast(err.message, true);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = '⬇️ Extrair do SEI';
@@ -609,12 +621,37 @@ async function renderUsuarios() {
 // ============================================================
 async function renderConfigSei() {
   shell('<div class="empty">Carregando…</div>');
-  const cfgs = await api.get('/api/sei/config');
+  const [cfgs, modo] = await Promise.all([api.get('/api/sei/config'), api.get('/api/sei/modo')]);
+  const real = !modo.simulacao;
   setMain(`
     <div class="page-head">
       <div><h2>Configuração do SEI</h2><div class="desc">Credenciais de acesso do robô ao SEI de Nova Iguaçu.</div></div>
       <button class="btn" id="btn-nova-cfg">＋ Nova configuração</button>
     </div>
+
+    <div class="card">
+      <div class="card-h">Modo de operação</div>
+      <div class="card-b">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:240px">
+            <div style="font-weight:600;font-size:16px">
+              ${real ? '🟢 SEI REAL — acessando o SEI de verdade' : '🟡 Simulação — dados de exemplo'}
+            </div>
+            <div class="muted" style="margin-top:4px">
+              ${real
+                ? 'O robô vai logar no SEI com as credenciais cadastradas e extrair/lançar de verdade.'
+                : 'O sistema usa processos de exemplo. Nada é enviado ao SEI. Bom para treinar.'}
+            </div>
+          </div>
+          <button class="btn ${real ? 'warn' : 'ok'}" id="btn-modo" ${modo.travadoPorEnv ? 'disabled' : ''}>
+            ${real ? 'Voltar para simulação' : 'Ativar SEI real'}
+          </button>
+        </div>
+        ${modo.travadoPorEnv ? '<div class="muted" style="margin-top:10px">O modo está fixado pela variável de ambiente SEI_MOCK e não pode ser mudado por aqui.</div>' : ''}
+        ${real ? '<div class="error-msg" style="min-height:auto;margin-top:12px">⚠ Modo real ligado: cadastre a configuração com usuário e senha do SEI abaixo antes de extrair.</div>' : ''}
+      </div>
+    </div>
+
     <div class="card"><div class="card-b muted">
       As senhas são guardadas criptografadas e nunca exibidas. O robô usa estas credenciais para logar no SEI e extrair os processos do “Controle de Processos” da unidade.
     </div></div>
@@ -631,6 +668,24 @@ async function renderConfigSei() {
       </table>` : '<div class="empty">Nenhuma configuração. Em modo simulação o sistema funciona sem cadastrar nada.</div>'}
     </div>
   `);
+  const btnModo = document.getElementById('btn-modo');
+  if (btnModo && !modo.travadoPorEnv) btnModo.onclick = async () => {
+    const ativarReal = modo.simulacao; // se está em simulação, o clique ativa o real
+    if (ativarReal) {
+      const ok = await modal({
+        titulo: 'Ativar SEI real',
+        okLabel: 'Sim, ativar o SEI real',
+        okClasse: 'btn ok',
+        corpo: `<p>A partir de agora o robô vai <b>acessar o SEI de verdade</b> com as credenciais cadastradas.
+          Confirme que já cadastrou a configuração com <b>usuário e senha</b> do SEI.</p>`,
+      });
+      if (!ok) return;
+    }
+    await api.post('/api/sei/modo', { simulacao: !ativarReal });
+    toast(ativarReal ? 'Modo SEI real ativado' : 'Voltou para simulação');
+    renderConfigSei();
+  };
+
   document.getElementById('btn-nova-cfg').onclick = async () => {
     const r = await modal({
       titulo: 'Nova configuração do SEI',
