@@ -127,6 +127,8 @@ function garantirColuna(tabela, nome, ddl) {
 }
 // Comprovante (print) do lançamento automático do despacho no SEI
 garantirColuna('despachos', 'comprovante', 'comprovante TEXT');
+// Arquivo de despacho feito fora do sistema (anexado pelo perito)
+garantirColuna('despachos', 'arquivo', 'arquivo TEXT');
 // Conteúdo (texto) e arquivo baixado de cada documento do SEI
 garantirColuna('documentos', 'conteudo', 'conteudo TEXT');
 garantirColuna('documentos', 'arquivo', 'arquivo TEXT');

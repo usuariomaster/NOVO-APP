@@ -538,25 +538,39 @@ function renderAreaDespacho(p, isOper, isPerito) {
             <label>Texto do despacho</label>
             <textarea id="d-texto" placeholder="Redija aqui o despacho…">${esc(d?.texto || '')}</textarea>
           </div>
+          <div class="field">
+            <label>Ou anexe um despacho feito fora do sistema (PDF/imagem)</label>
+            <div class="row" style="align-items:center">
+              <input type="file" id="d-arquivo" style="flex:2">
+              <button class="btn secondary" id="btn-anexar-despacho" style="flex:1">📎 Anexar</button>
+            </div>
+            ${d?.arquivo ? `<div style="margin-top:8px"><a class="btn secondary sm" href="/api/despachos/processo/${p.id}/arquivo" target="_blank" rel="noopener">📄 Ver despacho anexado</a></div>` : ''}
+          </div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:8px 0 16px">
           <div class="row">
             <button class="btn secondary" id="btn-salvar-despacho">💾 Salvar rascunho</button>
             <button class="btn ok" id="btn-enviar-despacho">✔ Enviar para conferência</button>
           </div>
+          ${podeSei() ? `<div style="margin-top:10px"><button class="btn" id="btn-tramitar-sei" style="width:100%">🚀 Tramitar direto ao SEI</button>
+            <div class="muted" style="margin-top:4px;font-size:12px">Seu papel permite lançar direto no SEI, sem conferência do operador.</div></div>` : ''}
         </div>
       </div>`;
   }
   // Visualização do despacho (operador conferindo, ou já finalizado)
-  if (d && d.texto) {
+  if (d && (d.texto || d.arquivo)) {
     const comprovante = d.comprovante
       ? `<div style="margin-top:12px"><a class="btn secondary sm" href="/api/processos/${p.id}/comprovante" target="_blank" rel="noopener">🧾 Ver comprovante do lançamento no SEI</a></div>`
+      : '';
+    const anexo = d.arquivo
+      ? `<div style="margin-top:12px"><a class="btn secondary sm" href="/api/despachos/processo/${p.id}/arquivo" target="_blank" rel="noopener">📄 Ver despacho anexado</a></div>`
       : '';
     return `
       <div class="card">
         <div class="card-h">Despacho ${d.conclusao ? `— <strong>${esc(d.conclusao)}</strong>` : ''}</div>
         <div class="card-b">
-          <div style="white-space:pre-wrap">${esc(d.texto)}</div>
+          <div style="white-space:pre-wrap">${esc(d.texto || '')}</div>
           ${d.motivo_devolucao && d.status === 'devolvido' ? `<div class="error-msg" style="min-height:auto;margin-top:10px">↩ ${esc(d.motivo_devolucao)}</div>` : ''}
-          ${comprovante}
+          ${anexo}${comprovante}
         </div>
       </div>`;
   }
@@ -744,13 +758,51 @@ function ligarAcoes(p, isOper, isPerito) {
   };
   if (btnEnviar) btnEnviar.onclick = async () => {
     const d = coletar();
-    if (!d.texto.trim()) return toast('Escreva o texto do despacho', true);
     try {
-      await api.post(`/api/despachos/processo/${p.id}`, d);
+      if (d.texto.trim()) await api.post(`/api/despachos/processo/${p.id}`, d);
+      else if (!p.despacho?.arquivo) return toast('Escreva ou anexe o despacho', true);
       await api.post(`/api/despachos/processo/${p.id}/enviar`);
       toast('Despacho enviado para conferência');
       recarrega();
     } catch (e) { toast(e.message, true); }
+  };
+
+  // Anexar despacho externo (PDF/imagem)
+  const btnAnexar = document.getElementById('btn-anexar-despacho');
+  if (btnAnexar) btnAnexar.onclick = async () => {
+    const arq = document.getElementById('d-arquivo').files[0];
+    if (!arq) return toast('Escolha um arquivo', true);
+    const dados_base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(arq); });
+    try {
+      await api.post(`/api/despachos/processo/${p.id}/upload`, { nome_orig: arq.name, dados_base64, conclusao: document.getElementById('d-conclusao').value });
+      toast('Despacho anexado');
+      recarrega();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  // Tramitar direto ao SEI (perito administrador / master)
+  const btnTramitar = document.getElementById('btn-tramitar-sei');
+  if (btnTramitar) btnTramitar.onclick = async () => {
+    const d = coletar();
+    const ok = await modal({
+      titulo: 'Tramitar direto ao SEI',
+      okLabel: 'Tramitar agora',
+      corpo: `<p>O robô vai lançar o despacho <b>direto no SEI</b> (sem passar pela conferência do operador).</p>
+        <p class="muted">Confirma que o despacho está pronto?</p>`,
+    });
+    if (!ok) return;
+    btnTramitar.disabled = true;
+    btnTramitar.textContent = '⏳ Tramitando no SEI…';
+    try {
+      if (d.texto.trim()) await api.post(`/api/despachos/processo/${p.id}`, d);
+      const r = await api.post(`/api/despachos/processo/${p.id}/tramitar-sei`);
+      toast(r.modo === 'simulacao' ? 'Tramitado ao SEI (simulação)' : 'Despacho tramitado ao SEI');
+      recarrega();
+    } catch (e) {
+      toast(e.message, true);
+      btnTramitar.disabled = false;
+      btnTramitar.textContent = '🚀 Tramitar direto ao SEI';
+    }
   };
 }
 
