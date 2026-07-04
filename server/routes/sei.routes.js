@@ -149,7 +149,14 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
   });
   tx(resultado.processos);
 
-  res.json({ modo: resultado.modo, total: resultado.processos.length, novos, ignorados, debug: resultado.debug || null });
+  res.json({
+    modo: resultado.modo,
+    total: resultado.processos.length,
+    novos,
+    ignorados,
+    debug: resultado.debug || null,
+    amostra: resultado.amostra || null,
+  });
 });
 
 export default router;

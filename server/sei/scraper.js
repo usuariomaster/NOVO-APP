@@ -157,26 +157,56 @@ export async function autenticar(browser, cfg) {
   return { context, page, baseUrl };
 }
 
+// Coleta os links de processo dentro de UM frame (tolerante a erros).
+async function coletarDoFrame(frame) {
+  try {
+    return await frame.$$eval('a', (els) => {
+      // Reconhece número de processo: tem dígitos e algum separador (. - /),
+      // sem espaços, com tamanho razoável. Ex.: 00000.000123/2026-45,
+      // SEI-000000/000000/2026, 12345.678910/2026-01, etc.
+      const pareceProcesso = (s) =>
+        !!s && !/\s/.test(s) && /\d/.test(s) && /[.\-/]/.test(s) && s.length >= 9;
+      const out = [];
+      for (const el of els) {
+        const txt = (el.textContent || '').trim();
+        const href = el.getAttribute('href') || '';
+        const porHref = /procedimento_trabalhar|procedimento_visualizar/.test(href);
+        if ((porHref || pareceProcesso(txt)) && pareceProcesso(txt)) {
+          out.push({ numero_sei: txt, link_sei: el.href || '', porHref });
+        }
+      }
+      return out;
+    });
+  } catch {
+    return [];
+  }
+}
+
 // Extrai a lista de processos da tela "Controle de Processos".
 async function extrairControleProcessos(page, baseUrl, cfg) {
   const url = cfg.unidade
     ? `${baseUrl}/controlador.php?acao=procedimento_controlar&infra_unidade_atual=${cfg.unidade}`
     : `${baseUrl}/controlador.php?acao=procedimento_controlar`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(1500);
 
-  // O SEI mostra os processos em tabelas cujas linhas têm links
-  // para "procedimento_trabalhar". Extraímos número + link.
-  const linhas = await page.$$eval('a[href*="procedimento_trabalhar"]', (els) =>
-    els.map((el) => ({
-      numero_sei: (el.textContent || '').trim(),
-      link_sei: el.href,
-    }))
-  );
+  // A lista pode estar na página ou dentro de um quadro (iframe).
+  // Procuramos em todos os frames.
+  let candidatos = [];
+  for (const frame of page.frames()) {
+    candidatos = candidatos.concat(await coletarDoFrame(frame));
+  }
+
+  // Prioriza os que vieram por link de "trabalhar/visualizar"; se não houver
+  // nenhum, usa todos os que parecem número de processo (fallback).
+  const comHref = candidatos.filter((c) => c.porHref);
+  const base = comHref.length ? comHref : candidatos;
 
   // Deduplica por número
   const vistos = new Set();
   const processos = [];
-  for (const l of linhas) {
+  for (const l of base) {
     if (!l.numero_sei || vistos.has(l.numero_sei)) continue;
     vistos.add(l.numero_sei);
     processos.push({
@@ -190,7 +220,36 @@ async function extrairControleProcessos(page, baseUrl, cfg) {
       documentos: [],
     });
   }
-  return processos;
+
+  // Se nada foi encontrado, coleta uma amostra (texto) do que há na tela,
+  // para diagnóstico/calibração remota.
+  let amostra = null;
+  if (processos.length === 0) {
+    amostra = await coletarAmostra(page);
+  }
+  return { processos, amostra };
+}
+
+// Amostra de diagnóstico: títulos de tabelas e primeiros links de cada frame.
+async function coletarAmostra(page) {
+  const partes = [];
+  for (const frame of page.frames()) {
+    try {
+      const dados = await frame.$$eval('a', (els) =>
+        els
+          .map((el) => ({ t: (el.textContent || '').trim(), h: el.getAttribute('href') || '' }))
+          .filter((x) => x.t)
+          .slice(0, 60)
+      );
+      if (dados.length) {
+        partes.push(
+          `--- quadro: ${frame.url().slice(0, 80)} ---\n` +
+            dados.map((d) => `${d.t}  =>  ${d.h.slice(0, 90)}`).join('\n')
+        );
+      }
+    } catch { /* ignora */ }
+  }
+  return partes.join('\n\n').slice(0, 6000);
 }
 
 // API pública: extrai os processos usando a configuração informada.
@@ -208,10 +267,10 @@ export async function extrairProcessos(cfg, mock) {
   try {
     const auth = await autenticar(browser, cfg);
     page = auth.page;
-    const processos = await extrairControleProcessos(page, auth.baseUrl, cfg);
+    const { processos, amostra } = await extrairControleProcessos(page, auth.baseUrl, cfg);
     // Guarda um print do "Controle de Processos" para conferência/calibração.
     const debug = await salvarDiagnostico(page, 'debug-controle');
-    return { modo: 'sei', processos, debug };
+    return { modo: 'sei', processos, debug, amostra };
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-extracao');
     throw e;

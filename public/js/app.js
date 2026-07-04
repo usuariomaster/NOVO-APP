@@ -290,6 +290,23 @@ async function extrairDoSei() {
   try {
     const r = await api.post('/api/sei/extrair');
     const aviso = r.modo === 'simulacao' ? ' (modo simulação)' : '';
+    // No SEI real: se entrou mas não achou nenhum processo, mostra o que o robô viu.
+    if (r.modo === 'sei' && r.total === 0) {
+      const amostra = r.amostra
+        ? `<p class="muted" style="margin-top:14px"><b>Copie este texto e mande para o suporte</b> (ajuda a calibrar):</p>
+           <textarea readonly style="height:160px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.amostra)}</textarea>`
+        : '';
+      const img = r.debug
+        ? `<img src="/api/sei/debug/${encodeURIComponent(r.debug)}" style="width:100%;border:1px solid var(--border);border-radius:8px;margin-top:10px" />`
+        : '';
+      await modal({
+        titulo: 'O robô entrou, mas não encontrou a lista de processos',
+        okLabel: 'Fechar',
+        corpo: `<p>O login funcionou, mas o robô não reconheceu a lista de processos nesta tela do SEI.
+          Isso costuma acontecer quando a tela é diferente do padrão — dá para ajustar.</p>
+          ${amostra}${img}`,
+      });
+    }
     toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);
     carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value);
   } catch (err) {
