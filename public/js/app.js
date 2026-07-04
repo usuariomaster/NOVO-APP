@@ -197,33 +197,98 @@ function renderLogin() {
 // ============================================================
 // Painel
 // ============================================================
+// Calcula o farol de prazo de um processo.
+function farol(p, cfg) {
+  if (['concluido', 'enviado_sei'].includes(p.status)) return { cor: '', dot: '✔', label: 'concluído', dias: null };
+  const ref = p.distribuido_em || p.criado_em;
+  if (!ref) return { cor: 'v', dot: '🟢', label: '—', dias: 0 };
+  const d = new Date(ref.replace(' ', 'T') + (ref.includes('T') ? '' : 'Z'));
+  const dias = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (dias <= cfg.prazo_dias) return { cor: 'v', dot: '🟢', label: `${dias}d (no prazo)`, dias };
+  if (dias <= cfg.prazo_dias + cfg.atraso_dias) return { cor: 'a', dot: '🟡', label: `${dias}d (passou do prazo)`, dias };
+  return { cor: 'r', dot: '🔴', label: `${dias}d (atrasado)`, dias };
+}
+
 async function renderPainel() {
   shell('<div class="empty">Carregando…</div>');
-  const resumo = await api.get('/api/processos/resumo');
-  const ordem = ['em_controle', 'distribuido', 'em_pericia', 'despachado', 'devolvido', 'conferido', 'enviado_sei', 'concluido'];
-  const kpis = ordem
-    .map((s) => `<div class="kpi"><div class="n">${resumo[s] || 0}</div><div class="l">${STATUS[s]}</div></div>`)
-    .join('');
+  const [resumo, procs, cfg] = await Promise.all([
+    api.get('/api/processos/resumo'),
+    api.get('/api/processos'),
+    api.get('/api/processos/config-prazos').catch(() => ({ prazo_dias: 10, atraso_dias: 5 })),
+  ]);
 
   const isPerito = ehPerito();
-  const dica = isPerito
-    ? 'Abra “Meus processos” para despachar os processos distribuídos a você.'
-    : ehOper()
-    ? 'Use “Processos” para extrair do SEI, distribuir aos peritos e conferir os despachos.'
-    : '';
+  const isOper = ehOper();
+
+  // Processos "em tramitação" (não concluídos) com farol.
+  const emTramite = procs.filter((p) => !['concluido'].includes(p.status));
+  const contagem = { v: 0, a: 0, r: 0 };
+  for (const p of emTramite) {
+    const f = farol(p, cfg);
+    if (f.cor) contagem[f.cor]++;
+  }
+
+  const kpiPrazos = `
+    <div class="kpis">
+      <div class="kpi"><div class="n">${emTramite.length}</div><div class="l">Em tramitação</div></div>
+      <div class="kpi"><div class="n">🟢 ${contagem.v}</div><div class="l">No prazo</div></div>
+      <div class="kpi"><div class="n">🟡 ${contagem.a}</div><div class="l">Passou do prazo</div></div>
+      <div class="kpi"><div class="n">🔴 ${contagem.r}</div><div class="l">Atrasado</div></div>
+    </div>`;
+
+  const linhas = emTramite
+    .sort((a, b) => (farol(b, cfg).dias || 0) - (farol(a, cfg).dias || 0))
+    .map((p) => {
+      const f = farol(p, cfg);
+      return `<tr data-id="${p.id}">
+        <td style="font-size:18px" title="${esc(f.label)}">${f.dot}</td>
+        <td class="num-proc">${esc(p.numero_sei)}</td>
+        <td>${esc(p.especificacao || p.tipo || '—')}<br><span class="muted">${esc(p.interessado || '')}</span></td>
+        ${isOper ? `<td>${esc(p.perito_nome || '<sem perito>')}</td>` : ''}
+        <td>${badge(p.status)}</td>
+        <td class="muted">${esc(f.label)}</td>
+      </tr>`;
+    }).join('');
+
+  const configBtn = ehAdmin()
+    ? `<button class="btn secondary" id="btn-prazos">⏱ Configurar prazos (${cfg.prazo_dias}d / ${cfg.atraso_dias}d)</button>` : '';
 
   setMain(`
-    <div class="page-head"><div><h2>Painel</h2><div class="desc">Olá, ${esc(usuario.nome)}. ${dica}</div></div></div>
-    <div class="kpis">${kpis}</div>
-    <div class="card"><div class="card-b">
-      <strong>Fluxo do processo:</strong>
-      <p class="muted" style="margin:8px 0 0">
-        Extraído do SEI → <b>Em controle</b> → operador <b>distribui</b> ao perito →
-        perito <b>despacha</b> → operador <b>confere</b> (aprova ou devolve) →
-        operador <b>envia ao SEI</b> → <b>concluído</b>.
-      </p>
-    </div></div>
+    <div class="page-head">
+      <div><h2>Painel</h2><div class="desc">Olá, ${esc(usuario.nome)}.
+        ${isPerito ? 'Seus processos e prazos de resposta.' : 'Processos em tramitação na perícia e seus prazos.'}</div></div>
+      ${configBtn}
+    </div>
+    ${kpiPrazos}
+    <div class="card">
+      <div class="card-h">${isPerito ? 'Meus processos' : 'Em tramitação'} — prazo 🟢 até ${cfg.prazo_dias}d · 🟡 até ${cfg.prazo_dias + cfg.atraso_dias}d · 🔴 acima</div>
+      <div>${emTramite.length ? `<table>
+        <thead><tr><th>Prazo</th><th>Nº</th><th>Assunto / Interessado</th>${isOper ? '<th>Médico</th>' : ''}<th>Status</th><th>Tempo</th></tr></thead>
+        <tbody>${linhas}</tbody></table>` : '<div class="empty">Nenhum processo em tramitação.</div>'}</div>
+    </div>
   `);
+
+  document.querySelectorAll('#main-content tr[data-id]').forEach((tr) => {
+    tr.onclick = () => (location.hash = `#processo/${tr.dataset.id}`);
+  });
+
+  const btnPrazos = document.getElementById('btn-prazos');
+  if (btnPrazos) btnPrazos.onclick = async () => {
+    const r = await modal({
+      titulo: 'Configurar prazos',
+      okLabel: 'Salvar',
+      corpo: `<p class="muted">Dias a partir da distribuição ao perito.</p>
+        <div class="row">
+          <div class="field"><label>🟢 No prazo até (dias)</label><input name="prazo_dias" type="number" value="${cfg.prazo_dias}"></div>
+          <div class="field"><label>🟡 Tolerância extra (dias)</label><input name="atraso_dias" type="number" value="${cfg.atraso_dias}"></div>
+        </div>
+        <p class="muted">🔴 atrasado = acima de ${cfg.prazo_dias} + tolerância.</p>`,
+    });
+    if (!r) return;
+    await api.post('/api/processos/config-prazos', { prazo_dias: Number(r.prazo_dias), atraso_dias: Number(r.atraso_dias) });
+    toast('Prazos atualizados');
+    renderPainel();
+  };
 }
 
 // ============================================================

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import db, { registrarHistorico, ehSimulacao } from '../db.js';
+import db, { registrarHistorico, ehSimulacao, getConfig, setConfig } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
@@ -43,7 +43,7 @@ router.get('/', (req, res) => {
   const params = [];
 
   // Perito só enxerga os processos atribuídos a ele.
-  if (req.usuario.papel === 'perito') {
+  if (['perito', 'perito_admin'].includes(req.usuario.papel)) {
     where.push('p.perito_id = ?');
     params.push(req.usuario.id);
   }
@@ -63,7 +63,7 @@ router.get('/', (req, res) => {
 router.get('/resumo', (req, res) => {
   let sql = 'SELECT status, COUNT(*) AS total FROM processos';
   const params = [];
-  if (req.usuario.papel === 'perito') {
+  if (['perito', 'perito_admin'].includes(req.usuario.papel)) {
     sql += ' WHERE perito_id = ?';
     params.push(req.usuario.id);
   }
@@ -74,11 +74,28 @@ router.get('/resumo', (req, res) => {
   res.json(resumo);
 });
 
+// Configuração de prazos (dias para o farol verde/amarelo/vermelho).
+router.get('/config-prazos', (req, res) => {
+  res.json({
+    prazo_dias: Number(getConfig('prazo_dias', '10')),
+    atraso_dias: Number(getConfig('atraso_dias', '5')),
+  });
+});
+router.post('/config-prazos', exigirPapel('admin'), (req, res) => {
+  const { prazo_dias, atraso_dias } = req.body || {};
+  if (prazo_dias != null) setConfig('prazo_dias', Math.max(0, parseInt(prazo_dias, 10) || 0));
+  if (atraso_dias != null) setConfig('atraso_dias', Math.max(0, parseInt(atraso_dias, 10) || 0));
+  res.json({
+    prazo_dias: Number(getConfig('prazo_dias', '10')),
+    atraso_dias: Number(getConfig('atraso_dias', '5')),
+  });
+});
+
 // Detalhe de um processo (com documentos, despacho e histórico).
 router.get('/:id', (req, res) => {
   const proc = db.prepare(SELECT_PROC + ' WHERE p.id = ?').get(req.params.id);
   if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
-  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+  if (['perito','perito_admin'].includes(req.usuario.papel) && proc.perito_id !== req.usuario.id) {
     return res.status(403).json({ erro: 'Sem permissão' });
   }
   proc.documentos = db.prepare('SELECT * FROM documentos WHERE processo_id = ?').all(proc.id);
@@ -125,14 +142,15 @@ router.post('/:id/distribuir', exigirPapel('operador', 'admin'), (req, res) => {
   const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
   if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
 
-  const perito = db.prepare(`SELECT * FROM usuarios WHERE id = ? AND papel = 'perito' AND ativo = 1`).get(perito_id);
+  const perito = db.prepare(`SELECT * FROM usuarios WHERE id = ? AND papel LIKE 'perito%' AND ativo = 1`).get(perito_id);
   if (!perito) return res.status(400).json({ erro: 'Perito inválido' });
   if (!['em_controle', 'distribuido', 'devolvido'].includes(proc.status)) {
     return res.status(409).json({ erro: `Não é possível distribuir um processo com status "${proc.status}"` });
   }
 
   db.prepare(
-    `UPDATE processos SET perito_id = ?, operador_id = ?, status = 'distribuido', atualizado_em = datetime('now') WHERE id = ?`
+    `UPDATE processos SET perito_id = ?, operador_id = ?, status = 'distribuido',
+       distribuido_em = datetime('now'), atualizado_em = datetime('now') WHERE id = ?`
   ).run(perito_id, req.usuario.id, req.params.id);
   registrarHistorico({
     processoId: proc.id,
@@ -230,7 +248,7 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
 router.get('/:id/pdf', (req, res) => {
   const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
   if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
-  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+  if (['perito','perito_admin'].includes(req.usuario.papel) && proc.perito_id !== req.usuario.id) {
     return res.status(403).json({ erro: 'Sem permissão' });
   }
   if (!proc.pdf_processo) return res.status(404).json({ erro: 'PDF do processo ainda não gerado' });
@@ -244,7 +262,7 @@ router.get('/:id/pdf', (req, res) => {
 router.get('/:id/documento/:docId/arquivo', (req, res) => {
   const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
   if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
-  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+  if (['perito','perito_admin'].includes(req.usuario.papel) && proc.perito_id !== req.usuario.id) {
     return res.status(403).json({ erro: 'Sem permissão' });
   }
   const doc = db.prepare('SELECT * FROM documentos WHERE id = ? AND processo_id = ?').get(req.params.docId, proc.id);
@@ -320,7 +338,7 @@ router.post('/:id/enviar-sei', exigirPapel('operador', 'admin'), async (req, res
 router.get('/:id/comprovante', (req, res) => {
   const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
   if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
-  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+  if (['perito','perito_admin'].includes(req.usuario.papel) && proc.perito_id !== req.usuario.id) {
     return res.status(403).json({ erro: 'Sem permissão' });
   }
   const despacho = db.prepare('SELECT comprovante FROM despachos WHERE processo_id = ? ORDER BY id DESC LIMIT 1').get(proc.id);

@@ -133,6 +133,8 @@ garantirColuna('documentos', 'arquivo', 'arquivo TEXT');
 // Quando o conteúdo do processo foi buscado no SEI, e o PDF do processo
 garantirColuna('processos', 'conteudo_em', 'conteudo_em TEXT');
 garantirColuna('processos', 'pdf_processo', 'pdf_processo TEXT');
+// Quando o processo foi distribuído a um perito (para contar o prazo)
+garantirColuna('processos', 'distribuido_em', 'distribuido_em TEXT');
 // Dados do servidor/perito
 garantirColuna('usuarios', 'cpf', 'cpf TEXT');
 garantirColuna('usuarios', 'matricula', 'matricula TEXT');
