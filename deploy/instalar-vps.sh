@@ -60,9 +60,33 @@ cd "$APPDIR"
 log "Instalando dependências do sistema..."
 npm install
 
-# 5) Navegador do robô (Chromium) + libs do sistema
-log "Instalando o navegador do robô (Chromium)..."
-npx --yes playwright install --with-deps chromium || npx --yes playwright install chromium
+# 5) Bibliotecas do sistema para o Chromium
+#    (no RHEL/AlmaLinux o "--with-deps" do Playwright não funciona; instalamos manualmente)
+log "Instalando as bibliotecas do navegador..."
+if [ "$PM" = "apt" ]; then
+  npx --yes playwright install-deps chromium || true
+else
+  $PM install -y \
+    nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm mesa-libgbm \
+    libX11 libXcomposite libXdamage libXext libXfixes libXrandr libxcb libxkbcommon \
+    pango cairo alsa-lib libXScrnSaver gtk3 libxshmfence libXtst 2>/dev/null || true
+fi
+
+log "Baixando o navegador do robô (Chromium)..."
+npx --yes playwright install chromium
+
+# 5b) Console web (Cockpit): acessar o servidor pelo navegador, sem PuTTY caindo.
+log "Ativando o console web (Cockpit)..."
+if [ "$PM" = "apt" ]; then apt-get install -y cockpit || true; else $PM install -y cockpit || true; fi
+systemctl enable --now cockpit.socket 2>/dev/null || true
+
+# 5c) Libera as portas no firewall (painel + cockpit).
+if command -v firewall-cmd >/dev/null 2>&1; then
+  log "Liberando portas no firewall..."
+  firewall-cmd --permanent --add-port="${PORT}/tcp" 2>/dev/null || true
+  firewall-cmd --permanent --add-port=9090/tcp 2>/dev/null || true
+  firewall-cmd --reload 2>/dev/null || true
+fi
 
 # 6) Configuração (.env) com chave secreta forte
 if [ ! -f "$APPDIR/.env" ]; then
@@ -105,8 +129,9 @@ systemctl --no-pager --full status sispericia | head -n 12 || true
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 log "PRONTO!"
-echo "   Painel:  http://${IP:-SEU_IP}:$PORT"
-echo "   Login:   admin@pericia.local  /  admin123  (troque a senha)"
+echo "   Painel web:    http://${IP:-SEU_IP}:$PORT"
+echo "   Login:         admin@pericia.local  /  admin123  (troque a senha)"
+echo "   Console web:   https://${IP:-SEU_IP}:9090   (Cockpit — terminal no navegador, não cai)"
 echo
 echo "   Ver logs:      journalctl -u sispericia -f"
 echo "   Reiniciar:     systemctl restart sispericia"
