@@ -159,6 +159,7 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
     total: resultado.processos.length,
     novos,
     ignorados,
+    porUnidade: resultado.porUnidade || null,
     debug: resultado.debug || null,
     amostra: resultado.amostra || null,
   });

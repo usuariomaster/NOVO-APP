@@ -111,6 +111,14 @@ router.put('/:id', exigirPapel('operador', 'admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+// Exclui um processo (operador ou admin). Remove documentos, despachos e histórico.
+router.delete('/:id', exigirPapel('operador', 'admin'), (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  db.prepare('DELETE FROM processos WHERE id = ?').run(proc.id);
+  res.json({ ok: true });
+});
+
 // Distribui o processo para um perito (operador ou admin).
 router.post('/:id/distribuir', exigirPapel('operador', 'admin'), (req, res) => {
   const { perito_id } = req.body || {};

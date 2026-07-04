@@ -214,7 +214,7 @@ async function clicarControle(page) {
 // Importante: NÃO navegamos por URL direta — o SEI rejeita isso (falta o
 // hash de sessão) e volta ao login. Após o login o SEI já mostra o
 // "Controle de Processos"; se não for o caso, clicamos no menu.
-async function extrairControleProcessos(page, baseUrl, cfg) {
+async function extrairControleProcessos(page, unidadeNome) {
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(1500);
 
@@ -245,7 +245,7 @@ async function extrairControleProcessos(page, baseUrl, cfg) {
       interessado: null,
       especificacao: null,
       data_autuacao: null,
-      unidade_origem: cfg.apelido || null,
+      unidade_origem: unidadeNome || null,
       documentos: [],
     });
   }
@@ -281,14 +281,69 @@ async function coletarAmostra(page) {
   return partes.join('\n\n').slice(0, 6000);
 }
 
-// API pública: extrai os processos usando a configuração informada.
-// cfg = { base_url, orgao, unidade, usuario, senha, apelido }
+// Lê o nome da unidade atual (indicador no topo do SEI).
+async function unidadeAtual(page) {
+  for (const f of page.frames()) {
+    try {
+      const t = await f.evaluate(() => {
+        const el = document.querySelector('#lnkInfraUnidade, a[href*="infra_trocar_unidade"]');
+        return el ? (el.textContent || '').trim() : '';
+      });
+      if (t && t.length <= 60) return t;
+    } catch { /* ignora */ }
+  }
+  return null;
+}
+
+// Abre o "Trocar Unidade" e lista as unidades que o usuário pode acessar.
+async function listarUnidades(page) {
+  let abriu = false;
+  for (const f of page.frames()) {
+    try {
+      const link = f.locator('#lnkInfraUnidade, a[href*="infra_trocar_unidade"]').first();
+      if (await link.count()) { await link.click({ timeout: 10000 }); abriu = true; break; }
+    } catch { /* ignora */ }
+  }
+  if (!abriu) return [];
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1000);
+  for (const f of page.frames()) {
+    try {
+      const us = await f.$$eval('a', (els) =>
+        els
+          .map((e) => ({ nome: (e.textContent || '').trim(), href: e.href || '' }))
+          .filter((x) => x.nome && /id_unidade=/.test(x.href) && x.nome.length <= 60)
+      );
+      if (us.length) {
+        const vistos = new Set();
+        return us.filter((u) => (vistos.has(u.nome) ? false : vistos.add(u.nome)));
+      }
+    } catch { /* ignora */ }
+  }
+  return [];
+}
+
+// Troca para a unidade informada (o link carrega o hash de sessão).
+async function trocarUnidade(page, unidade) {
+  try {
+    await page.goto(unidade.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(1200);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// API pública: extrai os processos de TODAS as unidades permitidas.
 // mock = true usa dados de exemplo (não acessa o SEI).
 export async function extrairProcessos(cfg, mock) {
   if (mock) {
-    // Simula latência de rede
     await new Promise((r) => setTimeout(r, 400));
-    return { modo: 'simulacao', processos: processosDeExemplo() };
+    const processos = processosDeExemplo();
+    const porUnidade = {};
+    for (const p of processos) porUnidade[p.unidade_origem] = (porUnidade[p.unidade_origem] || 0) + 1;
+    return { modo: 'simulacao', processos, porUnidade };
   }
 
   const browser = await abrirNavegador();
@@ -296,14 +351,32 @@ export async function extrairProcessos(cfg, mock) {
   try {
     const auth = await autenticar(browser, cfg);
     page = auth.page;
-    const { processos, amostra } = await extrairControleProcessos(page, auth.baseUrl, cfg);
-    // Guarda um print do "Controle de Processos" para conferência/calibração.
-    const debug = await salvarDiagnostico(page, 'debug-controle');
-    // Salva também a amostra em texto, acessível por URL para calibração.
-    if (amostra) {
-      try { fs.writeFileSync(join(DIR_DIAG, 'debug-amostra.txt'), amostra, 'utf8'); } catch { /* ignora */ }
+
+    const todos = [];
+    const porUnidade = {};
+    const nomeAtual = (await unidadeAtual(page)) || cfg.apelido || 'Unidade atual';
+
+    // 1) Unidade em que já entramos.
+    const r1 = await extrairControleProcessos(page, nomeAtual);
+    for (const p of r1.processos) todos.push(p);
+    porUnidade[nomeAtual] = r1.processos.length;
+
+    // 2) Demais unidades permitidas.
+    const unidades = await listarUnidades(page);
+    for (const u of unidades) {
+      if (u.nome === nomeAtual) continue;
+      const ok = await trocarUnidade(page, u);
+      if (!ok) continue;
+      const r = await extrairControleProcessos(page, u.nome);
+      for (const p of r.processos) todos.push(p);
+      porUnidade[u.nome] = r.processos.length;
     }
-    return { modo: 'sei', processos, debug, amostra };
+
+    const debug = await salvarDiagnostico(page, 'debug-controle');
+    if (r1.amostra) {
+      try { fs.writeFileSync(join(DIR_DIAG, 'debug-amostra.txt'), r1.amostra, 'utf8'); } catch { /* ignora */ }
+    }
+    return { modo: 'sei', processos: todos, porUnidade, debug, amostra: r1.amostra };
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-extracao');
     throw e;

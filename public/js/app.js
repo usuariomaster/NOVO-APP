@@ -225,7 +225,7 @@ async function renderProcessos() {
 
   setMain(`
     <div class="page-head">
-      <div><h2>${isOper ? 'Controle de Processos' : 'Meus Processos'}</h2>
+      <div><h2>${isOper ? 'Controle de Processos' : 'Meus Processos'} <span id="contador-proc" class="badge pr-normal" style="font-size:14px">…</span></h2>
       <div class="desc">${isOper ? 'Processos extraídos do SEI e sua distribuição.' : 'Processos distribuídos a você para despacho.'}</div></div>
       ${botaoExtrair}
     </div>
@@ -256,30 +256,45 @@ async function carregarLista(q, status) {
   const procs = await api.get('/api/processos?' + params.toString());
   const cont = document.getElementById('lista-proc');
   if (!cont) return;
+  const contador = document.getElementById('contador-proc');
+  if (contador) contador.textContent = `${procs.length} processo(s)`;
   if (!procs.length) {
     cont.innerHTML = `<div class="empty">Nenhum processo encontrado.</div>`;
     return;
   }
+  const podeExcluir = usuario.papel === 'operador' || usuario.papel === 'admin';
   cont.innerHTML = `
     <table>
       <thead><tr>
-        <th>Nº do processo</th><th>Assunto / Interessado</th><th>Perito</th>
-        <th>Prioridade</th><th>Status</th><th>Atualizado</th>
+        <th>Nº do processo</th><th>Assunto / Interessado</th><th>Unidade</th><th>Perito</th>
+        <th>Prioridade</th><th>Status</th><th>Atualizado</th>${podeExcluir ? '<th></th>' : ''}
       </tr></thead>
       <tbody>
         ${procs.map((p) => `
           <tr data-id="${p.id}">
             <td class="num-proc">${esc(p.numero_sei)}</td>
             <td>${esc(p.especificacao || p.tipo || '—')}<br><span class="muted">${esc(p.interessado || '')}</span></td>
+            <td class="muted">${esc(p.unidade_origem || '—')}</td>
             <td>${esc(p.perito_nome || '—')}</td>
             <td>${badgePr(p.prioridade)}</td>
             <td>${badge(p.status)}</td>
             <td class="muted">${dataHora(p.atualizado_em)}</td>
+            ${podeExcluir ? `<td><button class="btn danger sm" data-del="${p.id}" title="Excluir">🗑</button></td>` : ''}
           </tr>`).join('')}
       </tbody>
     </table>`;
   cont.querySelectorAll('tr[data-id]').forEach((tr) => {
-    tr.onclick = () => (location.hash = `#processo/${tr.dataset.id}`);
+    tr.onclick = (e) => { if (e.target.closest('[data-del]')) return; location.hash = `#processo/${tr.dataset.id}`; };
+  });
+  cont.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      const ok = await modal({ titulo: 'Excluir processo', okLabel: 'Excluir', okClasse: 'btn danger',
+        corpo: `<p>Excluir este processo do controle? (não afeta o SEI)</p>` });
+      if (!ok) return;
+      try { await api.del('/api/processos/' + b.dataset.del); toast('Processo excluído'); carregarLista(q, status); }
+      catch (err) { toast(err.message, true); }
+    };
   });
 }
 
@@ -307,7 +322,19 @@ async function extrairDoSei() {
           ${amostra}${img}`,
       });
     }
-    toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);
+    // Resumo por unidade (de onde vieram os processos).
+    if (r.porUnidade && Object.keys(r.porUnidade).length) {
+      const linhas = Object.entries(r.porUnidade)
+        .map(([u, n]) => `<li><b>${esc(u)}</b>: ${n} processo(s)</li>`).join('');
+      await modal({
+        titulo: 'Extração concluída',
+        okLabel: 'Ver processos',
+        corpo: `<p><b>${r.novos}</b> novo(s) e <b>${r.ignorados}</b> já existente(s).</p>
+          <p class="muted">De onde vieram:</p><ul style="margin:0;padding-left:18px">${linhas}</ul>`,
+      });
+    } else {
+      toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);
+    }
     carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value);
   } catch (err) {
     // Se o robô devolveu um print do que viu (falha no SEI real), mostra.
