@@ -46,6 +46,20 @@ else
   $PM install -y nodejs git gcc gcc-c++ make python3 ca-certificates
 fi
 
+# 2b) Repositório extra (EPEL), fuso horário e memória swap
+log "Preparando o ambiente de produção..."
+if [ "$PM" != "apt" ]; then $PM install -y epel-release 2>/dev/null || true; fi
+timedatectl set-timezone America/Sao_Paulo 2>/dev/null || true
+
+# Swap: evita o navegador derrubar o servidor por falta de memória (VPS pequeno).
+RAM_MB="$(free -m 2>/dev/null | awk '/^Mem:/{print $2}')"
+if [ ! -f /swapfile ] && [ "${RAM_MB:-4000}" -lt 3000 ] && ! swapon --show | grep -q .; then
+  log "Criando 2GB de swap..."
+  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 # 3) Código do sistema
 log "Baixando/atualizando o código em $APPDIR..."
 if [ -d "$APPDIR/.git" ]; then
@@ -68,8 +82,14 @@ if [ "$PM" = "apt" ]; then
 else
   $PM install -y \
     nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm mesa-libgbm \
-    libX11 libXcomposite libXdamage libXext libXfixes libXrandr libxcb libxkbcommon \
-    pango cairo alsa-lib libXScrnSaver gtk3 libxshmfence libXtst 2>/dev/null || true
+    libX11 libXcomposite libXdamage libXext libXfixes libXrandr libXi libXtst \
+    libxcb libxkbcommon libxshmfence pango cairo alsa-lib libXScrnSaver gtk3 \
+    2>/dev/null || true
+  # Fontes (para páginas e PDFs renderizarem sem caixinhas/acentos quebrados)
+  $PM install -y \
+    dejavu-sans-fonts dejavu-serif-fonts liberation-fonts liberation-narrow-fonts \
+    google-noto-sans-fonts google-noto-serif-fonts google-noto-emoji-fonts \
+    urw-base35-fonts fontconfig 2>/dev/null || true
 fi
 
 log "Baixando o navegador do robô (Chromium)..."
@@ -80,11 +100,10 @@ log "Ativando o console web (Cockpit)..."
 if [ "$PM" = "apt" ]; then apt-get install -y cockpit || true; else $PM install -y cockpit || true; fi
 systemctl enable --now cockpit.socket 2>/dev/null || true
 
-# 5c) Libera as portas no firewall (painel + cockpit).
+# 5c) Libera as portas no firewall (painel + cockpit + web).
 if command -v firewall-cmd >/dev/null 2>&1; then
   log "Liberando portas no firewall..."
-  firewall-cmd --permanent --add-port="${PORT}/tcp" 2>/dev/null || true
-  firewall-cmd --permanent --add-port=9090/tcp 2>/dev/null || true
+  for p in "${PORT}" 80 443 9090; do firewall-cmd --permanent --add-port="${p}/tcp" 2>/dev/null || true; done
   firewall-cmd --reload 2>/dev/null || true
 fi
 
@@ -127,12 +146,50 @@ systemctl restart sispericia
 sleep 2
 systemctl --no-pager --full status sispericia | head -n 12 || true
 
+# 8) nginx como proxy reverso: acessar na porta 80 (http://IP) e pronto p/ HTTPS.
+log "Configurando o nginx (porta 80)..."
+if [ "$PM" = "apt" ]; then apt-get install -y nginx || true; else $PM install -y nginx || true; fi
+if command -v nginx >/dev/null 2>&1; then
+  # tira o "default_server" do nginx.conf de fábrica para o nosso assumir a porta 80
+  sed -i 's/ default_server//g' /etc/nginx/nginx.conf 2>/dev/null || true
+  cat > /etc/nginx/conf.d/sispericia.conf <<NGINX
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    client_max_body_size 80m;
+    location / {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_read_timeout 300s;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGINX
+  if nginx -t 2>/dev/null; then
+    systemctl enable nginx 2>/dev/null || true
+    systemctl restart nginx 2>/dev/null || true
+  else
+    echo "   [aviso] nginx não validou; o painel continua na porta $PORT."
+    rm -f /etc/nginx/conf.d/sispericia.conf
+  fi
+fi
+
+# 9) certbot instalado e pronto (para HTTPS quando houver um domínio apontado)
+if [ "$PM" != "apt" ]; then $PM install -y certbot python3-certbot-nginx 2>/dev/null || true
+else apt-get install -y certbot python3-certbot-nginx 2>/dev/null || true; fi
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 log "PRONTO!"
-echo "   Painel web:    http://${IP:-SEU_IP}:$PORT"
+echo "   Painel web:    http://${IP:-SEU_IP}        (porta 80, via nginx)"
+echo "   Painel web:    http://${IP:-SEU_IP}:$PORT     (acesso direto)"
 echo "   Login:         admin@pericia.local  /  admin123  (troque a senha)"
 echo "   Console web:   https://${IP:-SEU_IP}:9090   (Cockpit — terminal no navegador, não cai)"
 echo
 echo "   Ver logs:      journalctl -u sispericia -f"
 echo "   Reiniciar:     systemctl restart sispericia"
 echo "   Atualizar:     bash $APPDIR/deploy/instalar-vps.sh"
+echo "   HTTPS (com domínio):  certbot --nginx -d SEU_DOMINIO"
