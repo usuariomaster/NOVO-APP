@@ -12,6 +12,7 @@
 // processos de exemplo para o sistema ser testado de ponta a
 // ponta sem credenciais.
 // ============================================================
+import fs from 'node:fs';
 
 export const MOCK = () => String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
 export const HEADFUL = () => String(process.env.SEI_HEADFUL ?? 'false').toLowerCase() === 'true';
@@ -34,10 +35,29 @@ export const SEL = {
   enviarProcesso: 'a[href*="procedimento_enviar"], img[title="Enviar Processo"]',
 };
 
-// Sobe o navegador do robô usando o Chromium do ambiente quando existir.
+// Procura um Chromium já instalado no ambiente (útil quando o pacote
+// não baixou o navegador). Retorna o caminho do executável ou null.
+function acharChromiumInstalado() {
+  if (process.env.PLAYWRIGHT_CHROMIUM) return process.env.PLAYWRIGHT_CHROMIUM;
+  try {
+    const bases = ['/opt/pw-browsers'];
+    for (const base of bases) {
+      if (!fs.existsSync(base)) continue;
+      for (const dir of fs.readdirSync(base)) {
+        if (!/^chromium-\d+$/.test(dir)) continue;
+        const alvo = `${base}/${dir}/chrome-linux/chrome`;
+        if (fs.existsSync(alvo)) return alvo;
+      }
+    }
+  } catch { /* ignora */ }
+  return null;
+}
+
+// Sobe o navegador do robô. Usa o navegador do próprio Playwright quando
+// disponível; senão, cai para um Chromium já instalado no ambiente.
 export async function abrirNavegador() {
   const { chromium } = await import('playwright');
-  const execPath = process.env.PLAYWRIGHT_CHROMIUM || undefined;
+  const execPath = acharChromiumInstalado() || undefined;
   return chromium.launch({
     headless: !HEADFUL(),
     ...(execPath ? { executablePath: execPath } : {}),
