@@ -162,9 +162,11 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
        tipo = COALESCE(?, tipo),
        interessado = COALESCE(?, interessado),
        especificacao = COALESCE(?, especificacao),
+       pdf_processo = COALESCE(?, pdf_processo),
+       conteudo_em = datetime('now'),
        atualizado_em = datetime('now')
      WHERE id = ?`
-  ).run(r.tipo || null, r.interessado || null, r.especificacao || null, proc.id);
+  ).run(r.tipo || null, r.interessado || null, r.especificacao || null, r.pdfProcesso || null, proc.id);
 
   // Substitui a lista de documentos (com conteúdo/arquivo).
   let comPdf = 0;
@@ -190,17 +192,21 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     if (r.amostraDoc) writeFileSync(join(DIR_COMPROVANTES, 'debug-documento.txt'), r.amostraDoc, 'utf8');
   } catch { /* ignora */ }
 
+  // Mantém apenas UMA ocorrência de "conteúdo buscado" no histórico
+  // (evita entupir com um registro a cada clique).
+  db.prepare(`DELETE FROM historico WHERE processo_id = ? AND acao = 'detalhado_sei'`).run(proc.id);
   registrarHistorico({
     processoId: proc.id,
     usuario: req.usuario,
     acao: 'detalhado_sei',
-    detalhe: `Conteúdo buscado no SEI (${r.modo}) — ${Array.isArray(r.documentos) ? r.documentos.length : 0} documento(s)`,
+    detalhe: `Conteúdo atualizado do SEI${r.pdfProcesso ? ' (com PDF do processo)' : ''}`,
   });
 
   res.json({
     ok: true,
     modo: r.modo,
     documentos: Array.isArray(r.documentos) ? r.documentos.length : 0,
+    pdfProcesso: r.pdfProcesso || null,
     comPdf,
     comTexto,
     interessado: r.interessado || null,
@@ -210,6 +216,20 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     amostraDoc: r.amostraDoc || null,
     debug: r.debug || null,
   });
+});
+
+// Baixa/serve o PDF do processo inteiro (para consulta/impressão/prontuário).
+router.get('/:id/pdf', (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+    return res.status(403).json({ erro: 'Sem permissão' });
+  }
+  if (!proc.pdf_processo) return res.status(404).json({ erro: 'PDF do processo ainda não gerado' });
+  const nome = String(proc.pdf_processo).replace(/[^a-zA-Z0-9._-]/g, '');
+  const caminho = join(DIR_DOCS, `proc-${proc.id}`, nome);
+  if (!existsSync(caminho)) return res.status(404).json({ erro: 'Arquivo não encontrado' });
+  res.sendFile(caminho);
 });
 
 // Baixa/serve o PDF arquivado de um documento.

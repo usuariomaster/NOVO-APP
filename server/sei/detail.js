@@ -137,65 +137,53 @@ async function amostraDocumento(page) {
   return partes.join('\n\n').slice(0, 8000);
 }
 
-// Abre cada documento na árvore e lê o conteúdo: para documentos gerados
-// no SEI (ex.: Despacho) guarda o TEXTO; para anexos (PDF) baixa o arquivo.
-async function extrairConteudos(page, baseUrl, docs, dir) {
-  const arvore = await acharArvore(page);
-  if (!arvore) return;
-  const limite = Math.min(docs.length, 30);
-
-  for (let i = 0; i < limite; i++) {
-    const doc = docs[i];
+// Gera o PDF do processo inteiro usando a função nativa do SEI
+// ("Gerar Arquivo PDF do Processo") e salva o arquivo. Retorna o nome
+// do arquivo salvo, ou null se não conseguiu.
+async function gerarPdfProcesso(page, dir, processoId) {
+  // 1) Procura e clica em "Gerar Arquivo PDF do Processo" (na barra do processo).
+  let abriu = false;
+  for (const f of page.frames()) {
     try {
-      // Clica no documento (pelo número) dentro da árvore.
-      const link = arvore.locator(`a:has-text("${doc.numero}")`).first();
-      if (!(await link.count())) continue;
-      await link.click({ timeout: 10000 });
-      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-      await page.waitForTimeout(900);
-
-      const conteudo = acharConteudo(page);
-      if (!conteudo) continue;
-
-      // Procura um PDF embutido (anexos) e/ou o texto (documentos gerados).
-      let pdfSrc = null;
-      let texto = '';
-      for (const f of [conteudo, ...conteudo.childFrames()]) {
-        try {
-          const info = await f.evaluate(() => {
-            const el = document.querySelector('embed[src],object[data],iframe[src]');
-            const src = el ? (el.getAttribute('src') || el.getAttribute('data') || '') : '';
-            const txt = document.body ? document.body.innerText.trim() : '';
-            return { src, txt };
-          });
-          if (info.src && !pdfSrc) pdfSrc = info.src;
-          if (info.txt && info.txt.length > texto.length) texto = info.txt;
-        } catch { /* ignora */ }
+      const link = f
+        .locator('a[href*="procedimento_gerar_pdf"], img[title*="Gerar Arquivo PDF do Processo"], a:has-text("Gerar Arquivo PDF")')
+        .first();
+      if (await link.count()) {
+        await link.click({ timeout: 10000 });
+        abriu = true;
+        break;
       }
-
-      // Baixa o PDF, se houver.
-      if (pdfSrc) {
-        try {
-          const abs = new URL(pdfSrc, baseUrl.replace(/\/?$/, '/')).href;
-          const resp = await page.context().request.get(abs, { timeout: 30000 });
-          if (resp.ok()) {
-            const buf = Buffer.from(await resp.body());
-            const ct = (resp.headers()['content-type'] || '').toLowerCase();
-            if (ct.includes('pdf') || buf.slice(0, 4).toString('latin1') === '%PDF') {
-              const nome = `doc-${doc.numero}.pdf`;
-              fs.writeFileSync(join(dir, nome), buf);
-              doc.arquivo = nome;
-            }
-          }
-        } catch { /* ignora */ }
-      }
-
-      // Guarda o texto (útil para despachos/documentos gerados no SEI).
-      if (texto && texto.length > 20) {
-        doc.conteudo = texto.slice(0, 20000);
-      }
-    } catch { /* segue para o próximo documento */ }
+    } catch { /* tenta o próximo quadro */ }
   }
+  if (!abriu) return null;
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+
+  // 2) Na tela de geração, clica "Gerar" e captura o download do PDF.
+  let download = null;
+  try {
+    const [dl] = await Promise.all([
+      page.waitForEvent('download', { timeout: 90000 }).catch(() => null),
+      (async () => {
+        for (const f of page.frames()) {
+          const b = f
+            .locator('#sbmGerar, input[type="button"][value*="Gerar"], input[type="submit"][value*="Gerar"], button:has-text("Gerar"), a:has-text("Gerar")')
+            .first();
+          if (await b.count()) { await b.click({ timeout: 10000 }).catch(() => {}); break; }
+        }
+      })(),
+    ]);
+    download = dl;
+  } catch { /* ignora */ }
+
+  if (download) {
+    const nome = `processo-${processoId}.pdf`;
+    try {
+      await download.saveAs(join(dir, nome));
+      return nome;
+    } catch { /* ignora */ }
+  }
+  return null;
 }
 
 // Tenta ler interessado/tipo/especificação a partir do texto das telas.
@@ -223,16 +211,21 @@ async function coletarAmostra(page) {
   for (const frame of page.frames()) {
     try {
       const info = await frame.evaluate(() => {
-        const txt = (document.body ? document.body.innerText : '').trim().slice(0, 1500);
-        const links = Array.from(document.querySelectorAll('a'))
-          .map((a) => (a.textContent || '').trim())
+        const txt = (document.body ? document.body.innerText : '').trim().slice(0, 1200);
+        // links relevantes (ações da barra): texto/title + href/onclick
+        const links = Array.from(document.querySelectorAll('a,img,input[type=button],input[type=submit]'))
+          .map((a) => {
+            const t = (a.textContent || a.getAttribute('title') || a.getAttribute('value') || '').trim();
+            const h = (a.getAttribute('href') || a.getAttribute('onclick') || '').slice(0, 120);
+            return t || h ? `${t}  =>  ${h}` : '';
+          })
           .filter(Boolean)
-          .slice(0, 40);
+          .slice(0, 60);
         return { txt, links };
       });
       if (info.txt || info.links.length) {
         partes.push(
-          `--- quadro: ${frame.url().slice(0, 80)} ---\nTEXTO:\n${info.txt}\nLINKS:\n${info.links.join(' | ')}`
+          `--- quadro: ${frame.url().slice(0, 80)} ---\nTEXTO:\n${info.txt}\nACOES:\n${info.links.join('\n')}`
         );
       }
     } catch { /* ignora */ }
@@ -250,9 +243,10 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
       tipo: 'Perícia Médica',
       especificacao: 'Solicitação de perícia para readaptação funcional',
       documentos: [
-        { numero: '0012345', tipo: 'Requerimento', link_sei: '', conteudo: 'Conteúdo simulado do requerimento.' },
-        { numero: '0012346', tipo: 'Laudo Médico', link_sei: '', conteudo: null },
+        { numero: '0012345', tipo: 'Requerimento', link_sei: '' },
+        { numero: '0012346', tipo: 'Laudo Médico', link_sei: '' },
       ],
+      pdfProcesso: null,
       amostra: null,
     };
   }
@@ -268,12 +262,12 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
     const meta = await coletarMetadados(page);
     const amostra = await coletarAmostra(page);
     const debug = await salvarDiagnostico(page, `debug-processo`);
-    // Abre cada documento: lê o texto (despachos) e baixa os PDFs (anexos).
+    // Gera o PDF do processo inteiro (para consulta/impressão/prontuário).
+    let pdfProcesso = null;
     if (dados.dir) {
-      await extrairConteudos(page, auth.baseUrl, documentos, dados.dir);
+      pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
     }
-    const amostraDoc = await amostraDocumento(page);
-    return { modo: 'sei', ...meta, documentos, amostra, amostraDoc, debug };
+    return { modo: 'sei', ...meta, documentos, pdfProcesso, amostra, debug };
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-processo-erro');
     throw e;

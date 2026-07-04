@@ -130,6 +130,9 @@ garantirColuna('despachos', 'comprovante', 'comprovante TEXT');
 // Conteúdo (texto) e arquivo baixado de cada documento do SEI
 garantirColuna('documentos', 'conteudo', 'conteudo TEXT');
 garantirColuna('documentos', 'arquivo', 'arquivo TEXT');
+// Quando o conteúdo do processo foi buscado no SEI, e o PDF do processo
+garantirColuna('processos', 'conteudo_em', 'conteudo_em TEXT');
+garantirColuna('processos', 'pdf_processo', 'pdf_processo TEXT');
 // Configuração da escrita automática no SEI
 garantirColuna('sei_config', 'escrita', 'escrita INTEGER NOT NULL DEFAULT 1');
 garantirColuna('sei_config', 'tipo_documento', "tipo_documento TEXT NOT NULL DEFAULT 'Despacho'");

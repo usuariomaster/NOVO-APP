@@ -369,8 +369,10 @@ async function renderProcessoDetalhe(id) {
         <a href="#processos" class="muted">← voltar</a>
         <h2 class="num-proc" style="margin-top:4px">${esc(p.numero_sei)}</h2>
         <div class="desc">${badge(p.status)} ${badgePr(p.prioridade)}
-          ${p.link_sei ? `• <a href="${esc(p.link_sei)}" target="_blank" rel="noopener">abrir no SEI ↗</a>` : ''}</div>
+          ${p.link_sei ? `• <a href="${esc(p.link_sei)}" target="_blank" rel="noopener">abrir no SEI ↗</a>` : ''}
+          ${p.conteudo_em ? `• <span class="muted">conteúdo atualizado em ${dataHora(p.conteudo_em)}</span>` : ''}</div>
       </div>
+      ${p.pdf_processo ? `<a class="btn" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener">📥 Baixar processo em PDF</a>` : ''}
     </div>
     <div class="detail-grid">
       <div>
@@ -521,23 +523,22 @@ function ligarAcoes(p, isOper, isPerito) {
     btnDetalhar.textContent = '⏳ Buscando no SEI…';
     try {
       const r = await api.post(`/api/processos/${p.id}/detalhar-sei`);
-      const pdf = r.comPdf || 0;
-      const txt = r.comTexto || 0;
-      // Se veio conteúdo, só avisa. Se não veio nada no SEI real, mostra o
-      // raio-x para calibração.
-      if (r.modo === 'sei' && pdf === 0 && txt === 0) {
+      // No SEI real, se o PDF do processo não gerou, mostra o raio-x pra calibrar.
+      if (r.modo === 'sei' && !r.pdfProcesso) {
         const box = (titulo, t) => t
           ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
              <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(t)}</textarea>` : '';
         await modal({
-          titulo: 'Documentos listados, mas sem conteúdo ainda',
+          titulo: 'Documentos listados — falta o PDF do processo',
           okLabel: 'Fechar',
-          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s), mas não consegui ler o texto/PDF.</p>
+          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s), mas não consegui gerar o PDF do processo.</p>
             <p class="muted">👉 Clique no quadro, Ctrl+A, copie e <b>cole no chat do suporte</b>:</p>
-            ${box('Raio-x do documento:', r.amostraDoc) || box('Raio-x do processo:', r.amostra) || '<i>Sem amostra.</i>'}`,
+            ${box('Raio-x do processo:', r.amostra) || '<i>Sem amostra.</i>'}`,
         });
+      } else if (r.modo === 'sei') {
+        toast(`Conteúdo atualizado: ${r.documentos} doc(s) — PDF do processo pronto.`);
       } else {
-        toast(`Conteúdo atualizado: ${r.documentos} doc(s), ${pdf} PDF(s), ${txt} com texto.`);
+        toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
       }
       recarrega();
     } catch (e) {
