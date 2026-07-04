@@ -59,7 +59,7 @@ function modal({ titulo, corpo, okLabel = 'Confirmar', okClasse = 'btn' }) {
       </div>`;
     const fechar = (v) => { root.innerHTML = ''; resolve(v); };
     root.querySelector('[data-cancel]').onclick = () => fechar(null);
-    root.querySelector('.modal-back').onclick = (e) => { if (e.target.classList.contains('modal-back')) fechar(null); };
+    // Não fecha ao clicar fora, para não perder o que já foi digitado.
     root.querySelector('[data-ok]').onclick = () => {
       const dados = {};
       root.querySelectorAll('[name]').forEach((i) => (dados[i.name] = i.value));
@@ -83,11 +83,21 @@ const rotas = {
 
 async function navegar() {
   const hash = location.hash;
-  if (hash.startsWith('#processo/')) {
-    return renderProcessoDetalhe(hash.split('/')[1]);
+  const fn = hash.startsWith('#processo/')
+    ? () => renderProcessoDetalhe(hash.split('/')[1])
+    : (rotas[hash] || renderPainel);
+  try {
+    await fn();
+  } catch (e) {
+    // Nunca deixa a tela travada em "Carregando…".
+    setMain(`
+      <div class="page-head"><h2>Ops…</h2></div>
+      <div class="card"><div class="card-b">
+        <p>Não consegui carregar esta tela: <b>${esc(e.message || e)}</b></p>
+        <p class="muted">O servidor pode ter sido fechado. Verifique se a janela preta continua aberta.</p>
+        <button class="btn" onclick="location.reload()">Tentar de novo</button>
+      </div></div>`);
   }
-  const fn = rotas[hash] || renderPainel;
-  fn();
   document.querySelectorAll('.nav a').forEach((a) => {
     a.classList.toggle('active', a.getAttribute('href') === (hash || '#painel'));
   });
@@ -621,7 +631,11 @@ async function renderUsuarios() {
 // ============================================================
 async function renderConfigSei() {
   shell('<div class="empty">Carregando…</div>');
-  const [cfgs, modo] = await Promise.all([api.get('/api/sei/config'), api.get('/api/sei/modo')]);
+  // À prova de falha: se algo não carregar, usa padrões em vez de travar.
+  const [cfgs, modo] = await Promise.all([
+    api.get('/api/sei/config').catch(() => []),
+    api.get('/api/sei/modo').catch(() => ({ simulacao: true, travadoPorEnv: false })),
+  ]);
   const real = !modo.simulacao;
   setMain(`
     <div class="page-head">

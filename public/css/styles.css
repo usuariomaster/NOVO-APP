@@ -180,10 +180,10 @@ textarea { resize: vertical; min-height: 140px; }
 
 /* ---------- Modal ---------- */
 .modal-back { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); display: grid; place-items: center; z-index: 50; padding: 20px; }
-.modal { background: #fff; border-radius: 14px; width: 100%; max-width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-.modal h3 { margin: 0; padding: 18px 20px; border-bottom: 1px solid var(--border); }
-.modal .modal-b { padding: 20px; }
-.modal .modal-f { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+.modal { background: #fff; border-radius: 14px; width: 100%; max-width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-height: 92vh; display: flex; flex-direction: column; }
+.modal h3 { margin: 0; padding: 18px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.modal .modal-b { padding: 20px; overflow-y: auto; }
+.modal .modal-f { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; }
 
 /* ---------- Toast ---------- */
 .toast {
