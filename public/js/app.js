@@ -714,6 +714,13 @@ function renderAcoes(p, isOper, isPerito) {
   if (isPerito && temDespacho) {
     acoes.push(`<a class="btn secondary" href="/api/processos/${p.id}/despacho-impressao" target="_blank" rel="noopener">🖨 Imprimir despacho</a>`);
   }
+  // Assinatura digital ICP-Brasil A1 (perito ou operador) quando há texto de despacho.
+  if ((isPerito || isOper) && p.despacho?.texto && p.perito_id) {
+    acoes.push(`<button class="btn" id="a-assinar">✍️ Assinar despacho (ICP-Brasil)</button>`);
+  }
+  if (p.pdf_assinado) {
+    acoes.push(`<a class="btn ok" href="/api/processos/${p.id}/despacho-assinado" target="_blank" rel="noopener">📄 Baixar despacho assinado</a>`);
+  }
   if (!acoes.length) acoes.push('<span class="muted">Nenhuma ação disponível neste momento.</span>');
   return acoes.join('<div style="height:10px"></div>');
 }
@@ -785,6 +792,22 @@ function ligarAcoes(p, isOper, isPerito) {
       } else { toast(e.message, true); }
       btnDetalhar.disabled = false;
       btnDetalhar.textContent = '🔎 Buscar conteúdo no SEI';
+    }
+  };
+
+  // Assinar despacho (ICP-Brasil)
+  const btnAssinar = document.getElementById('a-assinar');
+  if (btnAssinar) btnAssinar.onclick = async () => {
+    btnAssinar.disabled = true;
+    btnAssinar.textContent = '⏳ Assinando…';
+    try {
+      await api.post(`/api/processos/${p.id}/assinar-pdf`);
+      toast('Despacho assinado digitalmente');
+      recarrega();
+    } catch (e) {
+      toast(e.message, true);
+      btnAssinar.disabled = false;
+      btnAssinar.textContent = '✍️ Assinar despacho (ICP-Brasil)';
     }
   };
 
@@ -1032,6 +1055,15 @@ async function abrirFicha(id) {
           <div class="field" style="margin:0"><label>Arquivo</label><input id="f-arq" type="file"></div>
           <button class="btn sm" id="f-upload">Anexar</button>
         </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+        <div style="font-weight:600;margin-bottom:8px">🔏 Certificado digital (ICP-Brasil A1) — para assinar despachos</div>
+        <div class="muted" style="margin-bottom:8px">${u.tem_certificado ? '✅ Certificado cadastrado.' : 'Nenhum certificado cadastrado.'}
+          ${u.tem_certificado ? '<button class="btn danger sm" id="f-cert-del" style="margin-left:8px">Remover</button>' : ''}</div>
+        <div class="row" style="align-items:flex-end">
+          <div class="field" style="margin:0"><label>Arquivo .pfx / .p12</label><input id="f-cert-arq" type="file" accept=".pfx,.p12"></div>
+          <div class="field" style="margin:0"><label>Senha do certificado</label><input id="f-cert-senha" type="password"></div>
+          <button class="btn sm" id="f-cert-up">Salvar certificado</button>
+        </div>
       </div>
       <div class="modal-f"><button class="btn secondary" id="f-fechar">Fechar</button></div>
     </div></div>`;
@@ -1069,6 +1101,19 @@ async function abrirFicha(id) {
       abrirFicha(id);
     };
   });
+
+  // Certificado A1
+  document.getElementById('f-cert-up').onclick = async () => {
+    const arq = document.getElementById('f-cert-arq').files[0];
+    const senha = document.getElementById('f-cert-senha').value;
+    if (!arq) return toast('Escolha o arquivo .pfx/.p12', true);
+    if (!senha) return toast('Informe a senha do certificado', true);
+    const dados_base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(arq); });
+    try { await api.post(`/api/usuarios/${id}/certificado`, { dados_base64, senha }); toast('Certificado cadastrado'); abrirFicha(id); }
+    catch (e) { toast(e.message, true); }
+  };
+  const certDel = document.getElementById('f-cert-del');
+  if (certDel) certDel.onclick = async () => { await api.del(`/api/usuarios/${id}/certificado`); toast('Certificado removido'); abrirFicha(id); };
 }
 
 // ============================================================

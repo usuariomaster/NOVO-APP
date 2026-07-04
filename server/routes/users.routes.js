@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import db from '../db.js';
 import { exigirLogin, exigirPapel, gerarHash } from '../auth.js';
+import { criptografar } from '../sei/crypto.js';
 
 const router = Router();
 router.use(exigirLogin);
@@ -30,7 +31,32 @@ router.get('/:id', exigirPapel('admin', 'admin_master'), (req, res) => {
   const u = db.prepare('SELECT id, nome, email, papel, ativo, cpf, matricula, crm FROM usuarios WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ erro: 'Usuário não encontrado' });
   u.documentos = db.prepare('SELECT id, tipo, nome_orig, criado_em FROM servidor_documentos WHERE usuario_id = ? ORDER BY id DESC').all(u.id);
+  const cert = db.prepare('SELECT cert_arquivo FROM usuarios WHERE id = ?').get(u.id);
+  u.tem_certificado = !!cert?.cert_arquivo;
   res.json(u);
+});
+
+// Cadastra o certificado digital A1 (.pfx/.p12) do servidor + senha (criptografada).
+router.post('/:id/certificado', exigirPapel('admin', 'admin_master'), (req, res) => {
+  const { dados_base64, senha } = req.body || {};
+  const usuario = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
+  if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado' });
+  if (!dados_base64 || !senha) return res.status(400).json({ erro: 'Envie o arquivo do certificado e a senha' });
+
+  const dir = join(DIR_SERVIDORES, String(usuario.id));
+  mkdirSync(dir, { recursive: true });
+  const base = String(dados_base64).includes(',') ? String(dados_base64).split(',')[1] : String(dados_base64);
+  const buf = Buffer.from(base, 'base64');
+  if (buf.length > 5 * 1024 * 1024) return res.status(413).json({ erro: 'Arquivo muito grande' });
+  const arquivo = 'certificado.pfx';
+  writeFileSync(join(dir, arquivo), buf);
+  db.prepare('UPDATE usuarios SET cert_arquivo = ?, cert_senha = ? WHERE id = ?').run(arquivo, criptografar(senha), usuario.id);
+  res.status(201).json({ ok: true });
+});
+
+router.delete('/:id/certificado', exigirPapel('admin', 'admin_master'), (req, res) => {
+  db.prepare('UPDATE usuarios SET cert_arquivo = NULL, cert_senha = NULL WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 const PAPEIS = ['admin', 'admin_master', 'operador', 'perito', 'perito_admin'];

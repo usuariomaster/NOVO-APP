@@ -137,6 +137,8 @@ garantirColuna('processos', 'conteudo_em', 'conteudo_em TEXT');
 garantirColuna('processos', 'pdf_processo', 'pdf_processo TEXT');
 // Quando o processo foi distribuído a um perito (para contar o prazo)
 garantirColuna('processos', 'distribuido_em', 'distribuido_em TEXT');
+// PDF do despacho assinado digitalmente (ICP-Brasil A1)
+garantirColuna('processos', 'pdf_assinado', 'pdf_assinado TEXT');
 // Processos FÍSICOS (não tramitam no SEI): inclusão manual pelo operador
 garantirColuna('processos', 'fisico', 'fisico INTEGER NOT NULL DEFAULT 0');
 garantirColuna('processos', 'secretaria_destino', 'secretaria_destino TEXT');
@@ -152,13 +154,10 @@ CREATE TABLE IF NOT EXISTS remessas (
   criado_em    TEXT NOT NULL DEFAULT (datetime('now')),
   retirada_em  TEXT
 );`);
-// Dados do servidor/perito
-garantirColuna('usuarios', 'cpf', 'cpf TEXT');
-garantirColuna('usuarios', 'matricula', 'matricula TEXT');
-garantirColuna('usuarios', 'crm', 'crm TEXT');
-
 // Migração: remove a restrição antiga de papéis (que só aceitava
 // admin/operador/perito) para permitir novos papéis (perito_admin, admin_master).
+// Recria apenas as colunas ORIGINAIS; as demais são adicionadas logo abaixo
+// por garantirColuna (por isso a migração vem ANTES delas).
 const usuariosSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='usuarios'").get()?.sql || '';
 if (/papel\s+TEXT\s+NOT\s+NULL\s+CHECK/i.test(usuariosSql)) {
   db.pragma('foreign_keys = OFF');
@@ -171,19 +170,24 @@ if (/papel\s+TEXT\s+NOT\s+NULL\s+CHECK/i.test(usuariosSql)) {
       senha_hash  TEXT NOT NULL,
       papel       TEXT NOT NULL,
       ativo       INTEGER NOT NULL DEFAULT 1,
-      criado_em   TEXT NOT NULL DEFAULT (datetime('now')),
-      cpf         TEXT,
-      matricula   TEXT,
-      crm         TEXT
+      criado_em   TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    INSERT INTO usuarios_new (id, nome, email, senha_hash, papel, ativo, criado_em, cpf, matricula, crm)
-      SELECT id, nome, email, senha_hash, papel, ativo, criado_em, cpf, matricula, crm FROM usuarios;
+    INSERT INTO usuarios_new (id, nome, email, senha_hash, papel, ativo, criado_em)
+      SELECT id, nome, email, senha_hash, papel, ativo, criado_em FROM usuarios;
     DROP TABLE usuarios;
     ALTER TABLE usuarios_new RENAME TO usuarios;
     COMMIT;
   `);
   db.pragma('foreign_keys = ON');
 }
+
+// Dados do servidor/perito (após a migração de papéis, para não serem perdidos)
+garantirColuna('usuarios', 'cpf', 'cpf TEXT');
+garantirColuna('usuarios', 'matricula', 'matricula TEXT');
+garantirColuna('usuarios', 'crm', 'crm TEXT');
+// Certificado digital ICP-Brasil A1 do servidor (arquivo .pfx + senha criptografada)
+garantirColuna('usuarios', 'cert_arquivo', 'cert_arquivo TEXT');
+garantirColuna('usuarios', 'cert_senha', 'cert_senha TEXT');
 
 // Documentos do servidor (CRM, diploma, título, portaria de nomeação, etc.)
 db.exec(`

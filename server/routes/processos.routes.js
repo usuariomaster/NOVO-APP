@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import db, { registrarHistorico, ehSimulacao, getConfig, setConfig } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
 import { detalharProcessoNoSei } from '../sei/detail.js';
+import { htmlDespacho } from '../services/htmlDespacho.js';
+import { htmlParaPdfAssinado } from '../services/assinarPdf.js';
 
 // Monta a configuração do robô a partir da linha do banco (ou simulação).
 function montarCfg(cfgRow) {
@@ -31,6 +33,7 @@ router.use(exigirLogin);
 const DIR_DADOS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const DIR_COMPROVANTES = join(DIR_DADOS, 'comprovantes');
 const DIR_DOCS = join(DIR_DADOS, 'documentos');
+const DIR_SERVIDORES = join(DIR_DADOS, 'servidores');
 
 const SELECT_PROC = `
   SELECT p.*, u.nome AS perito_nome
@@ -163,26 +166,61 @@ router.get('/:id/despacho-impressao', (req, res) => {
   const proc = db.prepare(SELECT_PROC + ' WHERE p.id = ?').get(req.params.id);
   if (!proc) return res.status(404).send('Processo não encontrado');
   const d = db.prepare('SELECT * FROM despachos WHERE processo_id = ? ORDER BY id DESC LIMIT 1').get(proc.id);
-  const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
-    <title>Despacho ${esc(proc.numero_sei)}</title>
-    <style>body{font-family:Georgia,'Times New Roman',serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
-    h1{font-size:18px;text-align:center}.cab{text-align:center;margin-bottom:24px}.meta{font-size:14px;margin:16px 0;border:1px solid #ccc;padding:12px;border-radius:6px}
-    .meta b{display:inline-block;width:130px}.corpo{white-space:pre-wrap;margin:24px 0;text-align:justify}
-    .ass{margin-top:80px;text-align:center}.linha{border-top:1px solid #000;width:280px;margin:0 auto;padding-top:6px}
-    @media print{.noprint{display:none}}</style></head><body>
-    <div class="cab"><h1>PERÍCIA / JUNTA MÉDICA — DESPACHO</h1></div>
-    <div class="meta">
-      <div><b>Processo:</b> ${esc(proc.numero_sei)}${proc.fisico ? ' (físico)' : ''}</div>
-      <div><b>Interessado:</b> ${esc(proc.interessado || '—')}</div>
-      <div><b>Assunto:</b> ${esc(proc.especificacao || proc.tipo || '—')}</div>
-      <div><b>Perito:</b> ${esc(proc.perito_nome || '—')}</div>
-      <div><b>Conclusão:</b> ${esc(d?.conclusao || '—')}</div>
-    </div>
-    <div class="corpo">${esc(d?.texto || '(sem texto de despacho)')}</div>
-    <div class="ass"><div class="linha">${esc(proc.perito_nome || 'Perito')}</div></div>
-    <div class="noprint" style="text-align:center;margin-top:32px"><button onclick="print()" style="padding:10px 20px;font-size:15px">🖨 Imprimir</button></div>
-  </body></html>`);
+  res.set('Content-Type', 'text/html; charset=utf-8').send(htmlDespacho(proc, d));
+});
+
+// Assina o despacho digitalmente (ICP-Brasil A1) com o certificado do perito.
+router.post('/:id/assinar-pdf', exigirPapel('perito', 'operador', 'admin'), async (req, res) => {
+  const proc = db.prepare(SELECT_PROC + ' WHERE p.id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  if (['perito', 'perito_admin'].includes(req.usuario.papel) && proc.perito_id !== req.usuario.id) {
+    return res.status(403).json({ erro: 'Este processo não está com você' });
+  }
+  const d = db.prepare('SELECT * FROM despachos WHERE processo_id = ? ORDER BY id DESC LIMIT 1').get(proc.id);
+  if (!d || !d.texto?.trim()) return res.status(400).json({ erro: 'Salve o texto do despacho antes de assinar' });
+
+  // Certificado do perito responsável.
+  const perito = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(proc.perito_id);
+  if (!perito?.cert_arquivo || !perito?.cert_senha) {
+    return res.status(400).json({ erro: 'O perito não tem certificado A1 cadastrado (Usuários → Ficha → Certificado).' });
+  }
+  const certPath = join(DIR_SERVIDORES, String(perito.id), String(perito.cert_arquivo).replace(/[^a-zA-Z0-9._-]/g, ''));
+  if (!existsSync(certPath)) return res.status(400).json({ erro: 'Arquivo do certificado não encontrado' });
+
+  try {
+    const html = htmlDespacho(proc, d, { assinado: true });
+    const certBuf = readFileSync(certPath);
+    const senha = descriptografar(perito.cert_senha);
+    const assinado = await htmlParaPdfAssinado(html, certBuf, senha, {
+      nome: perito.nome, motivo: `Despacho — processo ${proc.numero_sei}`,
+    });
+    const dir = join(DIR_DOCS, `proc-${proc.id}`);
+    mkdirSync(dir, { recursive: true });
+    const nome = `despacho-assinado.pdf`;
+    writeFileSync(join(dir, nome), assinado);
+    db.prepare(`UPDATE processos SET pdf_assinado = ? WHERE id = ?`).run(nome, proc.id);
+    registrarHistorico({
+      processoId: proc.id, usuario: req.usuario, acao: 'despacho_assinado',
+      detalhe: `Despacho assinado digitalmente (ICP-Brasil A1) por ${perito.nome}`,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ erro: `Falha ao assinar: ${e.message}` });
+  }
+});
+
+// Serve o PDF do despacho assinado.
+router.get('/:id/despacho-assinado', (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  if (['perito', 'perito_admin'].includes(req.usuario.papel) && proc.perito_id !== req.usuario.id) {
+    return res.status(403).json({ erro: 'Sem permissão' });
+  }
+  if (!proc.pdf_assinado) return res.status(404).json({ erro: 'Despacho ainda não assinado' });
+  const nome = String(proc.pdf_assinado).replace(/[^a-zA-Z0-9._-]/g, '');
+  const caminho = join(DIR_DOCS, `proc-${proc.id}`, nome);
+  if (!existsSync(caminho)) return res.status(404).json({ erro: 'Arquivo não encontrado' });
+  res.sendFile(caminho);
 });
 
 // Exclui um processo (operador ou admin). Remove documentos, despachos e histórico.
