@@ -32,9 +32,10 @@ if not exist node_modules (
 )
 
 echo.
-echo Abrindo o sistema no navegador: http://localhost:3000
-echo (Para desligar, feche esta janela preta.)
+echo Iniciando o servidor... o navegador abrira sozinho em instantes.
+echo (Para desligar o sistema, feche esta janela preta.)
 echo.
-start "" http://localhost:3000
+rem Abre o navegador apenas depois de ~7s, dando tempo do servidor subir:
+start "" cmd /c "timeout /t 7 >nul & start "" http://localhost:3000"
 call npm start
 pause
