@@ -133,6 +133,49 @@ garantirColuna('documentos', 'arquivo', 'arquivo TEXT');
 // Quando o conteúdo do processo foi buscado no SEI, e o PDF do processo
 garantirColuna('processos', 'conteudo_em', 'conteudo_em TEXT');
 garantirColuna('processos', 'pdf_processo', 'pdf_processo TEXT');
+// Dados do servidor/perito
+garantirColuna('usuarios', 'cpf', 'cpf TEXT');
+garantirColuna('usuarios', 'matricula', 'matricula TEXT');
+garantirColuna('usuarios', 'crm', 'crm TEXT');
+
+// Migração: remove a restrição antiga de papéis (que só aceitava
+// admin/operador/perito) para permitir novos papéis (perito_admin, admin_master).
+const usuariosSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='usuarios'").get()?.sql || '';
+if (/papel\s+TEXT\s+NOT\s+NULL\s+CHECK/i.test(usuariosSql)) {
+  db.pragma('foreign_keys = OFF');
+  db.exec(`
+    BEGIN;
+    CREATE TABLE usuarios_new (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome        TEXT NOT NULL,
+      email       TEXT NOT NULL UNIQUE,
+      senha_hash  TEXT NOT NULL,
+      papel       TEXT NOT NULL,
+      ativo       INTEGER NOT NULL DEFAULT 1,
+      criado_em   TEXT NOT NULL DEFAULT (datetime('now')),
+      cpf         TEXT,
+      matricula   TEXT,
+      crm         TEXT
+    );
+    INSERT INTO usuarios_new (id, nome, email, senha_hash, papel, ativo, criado_em, cpf, matricula, crm)
+      SELECT id, nome, email, senha_hash, papel, ativo, criado_em, cpf, matricula, crm FROM usuarios;
+    DROP TABLE usuarios;
+    ALTER TABLE usuarios_new RENAME TO usuarios;
+    COMMIT;
+  `);
+  db.pragma('foreign_keys = ON');
+}
+
+// Documentos do servidor (CRM, diploma, título, portaria de nomeação, etc.)
+db.exec(`
+CREATE TABLE IF NOT EXISTS servidor_documentos (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo        TEXT NOT NULL,
+  arquivo     TEXT NOT NULL,
+  nome_orig   TEXT,
+  criado_em   TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Configuração da escrita automática no SEI
 garantirColuna('sei_config', 'escrita', 'escrita INTEGER NOT NULL DEFAULT 1');
 garantirColuna('sei_config', 'tipo_documento', "tipo_documento TEXT NOT NULL DEFAULT 'Despacho'");

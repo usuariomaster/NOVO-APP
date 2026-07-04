@@ -25,10 +25,17 @@ export function exigirLogin(req, res, next) {
   next();
 }
 
-// Middleware: exige um dos papéis informados.
+// Middleware: exige um dos papéis informados. Aplica hierarquia:
+//  - admin_master herda tudo de admin
+//  - perito_admin herda tudo de perito
+//  - admin/admin_master também podem agir como operador
 export function exigirPapel(...papeis) {
   return (req, res, next) => {
-    if (!req.usuario || !papeis.includes(req.usuario.papel)) {
+    const permitidos = new Set(papeis);
+    if (permitidos.has('admin')) permitidos.add('admin_master');
+    if (permitidos.has('operador')) { permitidos.add('admin'); permitidos.add('admin_master'); }
+    if (permitidos.has('perito')) permitidos.add('perito_admin');
+    if (!req.usuario || !permitidos.has(req.usuario.papel)) {
       return res.status(403).json({ erro: 'Sem permissão para esta ação' });
     }
     next();

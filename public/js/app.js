@@ -6,6 +6,17 @@ import { api } from './api.js';
 let usuario = null;
 const appEl = () => document.getElementById('app');
 
+// Helpers de papel (com hierarquia)
+const ehAdmin = () => ['admin', 'admin_master'].includes(usuario.papel);
+const ehOper = () => ['operador', 'admin', 'admin_master'].includes(usuario.papel);
+const ehPerito = () => ['perito', 'perito_admin'].includes(usuario.papel);
+const podeSei = () => ['admin_master', 'perito_admin'].includes(usuario.papel); // pode tramitar direto no SEI
+
+const PAPEL_LABEL = {
+  admin: 'Administrador', admin_master: 'Administrador Master',
+  operador: 'Operador', perito: 'Perito', perito_admin: 'Perito Administrador',
+};
+
 const STATUS = {
   novo: 'Novo',
   em_controle: 'Em controle',
@@ -108,9 +119,9 @@ window.addEventListener('hashchange', navegar);
 // Shell (layout com menu)
 // ============================================================
 function shell(conteudo) {
-  const isAdmin = usuario.papel === 'admin';
+  const isAdmin = usuario.papel === 'admin' || usuario.papel === 'admin_master';
   const isOper = usuario.papel === 'operador' || isAdmin;
-  const isPerito = usuario.papel === 'perito';
+  const isPerito = usuario.papel === 'perito' || usuario.papel === 'perito_admin';
   const nav = [
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#processos">📁 ${isPerito ? 'Meus processos' : 'Processos'}</a>`,
@@ -125,7 +136,7 @@ function shell(conteudo) {
         <nav class="nav">${nav}</nav>
         <div class="user">
           <div class="nome">${esc(usuario.nome)}</div>
-          <div class="papel">${esc(usuario.papel)}</div>
+          <div class="papel">${esc(PAPEL_LABEL[usuario.papel] || usuario.papel)}</div>
           <button id="btn-sair">Sair</button>
         </div>
       </aside>
@@ -194,10 +205,10 @@ async function renderPainel() {
     .map((s) => `<div class="kpi"><div class="n">${resumo[s] || 0}</div><div class="l">${STATUS[s]}</div></div>`)
     .join('');
 
-  const isPerito = usuario.papel === 'perito';
+  const isPerito = ehPerito();
   const dica = isPerito
     ? 'Abra “Meus processos” para despachar os processos distribuídos a você.'
-    : usuario.papel === 'operador' || usuario.papel === 'admin'
+    : ehOper()
     ? 'Use “Processos” para extrair do SEI, distribuir aos peritos e conferir os despachos.'
     : '';
 
@@ -220,7 +231,7 @@ async function renderPainel() {
 // ============================================================
 async function renderProcessos() {
   shell('<div class="empty">Carregando…</div>');
-  const isOper = usuario.papel === 'operador' || usuario.papel === 'admin';
+  const isOper = ehOper();
   const botaoExtrair = isOper ? `<button class="btn" id="btn-extrair">⬇️ Extrair do SEI</button>` : '';
 
   setMain(`
@@ -262,7 +273,7 @@ async function carregarLista(q, status) {
     cont.innerHTML = `<div class="empty">Nenhum processo encontrado.</div>`;
     return;
   }
-  const podeExcluir = usuario.papel === 'operador' || usuario.papel === 'admin';
+  const podeExcluir = ehOper();
   cont.innerHTML = `
     <table>
       <thead><tr>
@@ -368,8 +379,8 @@ async function renderProcessoDetalhe(id) {
     setMain(`<div class="page-head"><h2>Processo</h2></div><div class="card"><div class="empty">${esc(err.message)}</div></div>`);
     return;
   }
-  const isOper = usuario.papel === 'operador' || usuario.papel === 'admin';
-  const isPerito = usuario.papel === 'perito';
+  const isOper = ehOper();
+  const isPerito = ehPerito();
 
   const docs = p.documentos.length
     ? p.documentos.map((d) => `
@@ -681,47 +692,145 @@ function ligarAcoes(p, isOper, isPerito) {
 // ============================================================
 // Usuários (admin)
 // ============================================================
+const PAPEL_OPTS = `
+  <option value="perito">Perito</option>
+  <option value="perito_admin">Perito Administrador (tramita direto no SEI)</option>
+  <option value="operador">Operador</option>
+  <option value="admin">Administrador</option>
+  <option value="admin_master">Administrador Master (tramita direto no SEI)</option>`;
+
 async function renderUsuarios() {
   shell('<div class="empty">Carregando…</div>');
   const usuarios = await api.get('/api/usuarios');
   setMain(`
     <div class="page-head">
-      <div><h2>Usuários</h2><div class="desc">Gerencie operadores e peritos.</div></div>
-      <button class="btn" id="btn-novo-user">＋ Novo usuário</button>
+      <div><h2>Servidores / Usuários</h2><div class="desc">Operadores, peritos e administradores.</div></div>
+      <button class="btn" id="btn-novo-user">＋ Novo servidor</button>
     </div>
     <div class="card"><table>
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Nome</th><th>CRM</th><th>Matrícula</th><th>Papel</th><th>Status</th><th></th></tr></thead>
       <tbody>${usuarios.map((u) => `
         <tr>
-          <td>${esc(u.nome)}</td><td>${esc(u.email)}</td>
-          <td style="text-transform:capitalize">${esc(u.papel)}</td>
+          <td>${esc(u.nome)}<br><span class="muted">${esc(u.email)}</span></td>
+          <td>${esc(u.crm || '—')}</td>
+          <td>${esc(u.matricula || '—')}</td>
+          <td>${esc(PAPEL_LABEL[u.papel] || u.papel)}</td>
           <td>${u.ativo ? '<span class="badge st-conferido">ativo</span>' : '<span class="badge st-devolvido">inativo</span>'}</td>
-          <td><button class="btn secondary sm" data-edit="${u.id}" data-ativo="${u.ativo}">${u.ativo ? 'Desativar' : 'Ativar'}</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn secondary sm" data-ficha="${u.id}">📋 Ficha</button>
+            <button class="btn secondary sm" data-ativo-id="${u.id}" data-ativo="${u.ativo}">${u.ativo ? 'Desativar' : 'Ativar'}</button>
+            <button class="btn danger sm" data-del="${u.id}">🗑</button>
+          </td>
         </tr>`).join('')}</tbody>
     </table></div>
   `);
+
   document.getElementById('btn-novo-user').onclick = async () => {
     const r = await modal({
-      titulo: 'Novo usuário',
+      titulo: 'Novo servidor',
       okLabel: 'Criar',
       corpo: `
         <div class="field"><label>Nome</label><input name="nome"></div>
-        <div class="field"><label>E-mail</label><input name="email" type="email"></div>
-        <div class="field"><label>Senha</label><input name="senha" type="text" placeholder="senha inicial"></div>
-        <div class="field"><label>Papel</label><select name="papel">
-          <option value="perito">Perito</option>
-          <option value="operador">Operador</option>
-          <option value="admin">Administrador</option>
-        </select></div>`,
+        <div class="field"><label>E-mail (login)</label><input name="email" type="email"></div>
+        <div class="row">
+          <div class="field"><label>CPF</label><input name="cpf" placeholder="000.000.000-00"></div>
+          <div class="field"><label>Matrícula</label><input name="matricula"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>CRM</label><input name="crm" placeholder="somente peritos médicos"></div>
+          <div class="field"><label>Senha inicial</label><input name="senha" type="text"></div>
+        </div>
+        <div class="field"><label>Papel</label><select name="papel">${PAPEL_OPTS}</select></div>`,
     });
     if (!r) return;
-    try { await api.post('/api/usuarios', r); toast('Usuário criado'); renderUsuarios(); }
+    try { await api.post('/api/usuarios', r); toast('Servidor criado'); renderUsuarios(); }
     catch (e) { toast(e.message, true); }
   };
-  document.querySelectorAll('[data-edit]').forEach((b) => {
+
+  document.querySelectorAll('[data-ficha]').forEach((b) => { b.onclick = () => abrirFicha(b.dataset.ficha); });
+  document.querySelectorAll('[data-ativo-id]').forEach((b) => {
     b.onclick = async () => {
-      await api.put('/api/usuarios/' + b.dataset.edit, { ativo: b.dataset.ativo === '1' ? false : true });
+      await api.put('/api/usuarios/' + b.dataset.ativoId, { ativo: b.dataset.ativo === '1' ? false : true });
       renderUsuarios();
+    };
+  });
+  document.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      const ok = await modal({ titulo: 'Excluir servidor', okLabel: 'Excluir', okClasse: 'btn danger',
+        corpo: '<p>Excluir este servidor e seus documentos? Esta ação não pode ser desfeita.</p>' });
+      if (!ok) return;
+      try { await api.del('/api/usuarios/' + b.dataset.del); toast('Servidor excluído'); renderUsuarios(); }
+      catch (e) { toast(e.message, true); }
+    };
+  });
+}
+
+// Ficha do servidor: dados + documentos (upload/baixar/excluir).
+async function abrirFicha(id) {
+  const u = await api.get('/api/usuarios/' + id);
+  const root = document.getElementById('modal-root');
+  const docsHtml = (u.documentos || []).length
+    ? u.documentos.map((d) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+          <span style="flex:1"><b>${esc(d.tipo)}</b> ${d.nome_orig ? `<span class="muted">— ${esc(d.nome_orig)}</span>` : ''}</span>
+          <a class="btn secondary sm" href="/api/usuarios/${id}/documentos/${d.id}" target="_blank" rel="noopener">baixar</a>
+          <button class="btn danger sm" data-deldoc="${d.id}">🗑</button>
+        </div>`).join('')
+    : '<span class="muted">Nenhum documento anexado.</span>';
+
+  root.innerHTML = `
+    <div class="modal-back"><div class="modal">
+      <h3>Ficha — ${esc(u.nome)}</h3>
+      <div class="modal-b">
+        <div class="row"><div class="field"><label>Papel</label><select id="f-papel">${PAPEL_OPTS}</select></div>
+          <div class="field"><label>CRM</label><input id="f-crm" value="${esc(u.crm || '')}"></div></div>
+        <div class="row"><div class="field"><label>CPF</label><input id="f-cpf" value="${esc(u.cpf || '')}"></div>
+          <div class="field"><label>Matrícula</label><input id="f-matricula" value="${esc(u.matricula || '')}"></div></div>
+        <div class="row"><div class="field"><label>Nova senha (opcional)</label><input id="f-senha" type="text" placeholder="deixe vazio p/ manter"></div></div>
+        <button class="btn sm" id="f-salvar">Salvar dados</button>
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+        <div style="font-weight:600;margin-bottom:8px">Documentos (CRM, diploma, título, portaria de nomeação…)</div>
+        <div id="f-docs">${docsHtml}</div>
+        <div class="row" style="margin-top:12px;align-items:flex-end">
+          <div class="field" style="margin:0"><label>Tipo do documento</label><input id="f-tipo" placeholder="ex.: Diploma, CRM, Portaria DO"></div>
+          <div class="field" style="margin:0"><label>Arquivo</label><input id="f-arq" type="file"></div>
+          <button class="btn sm" id="f-upload">Anexar</button>
+        </div>
+      </div>
+      <div class="modal-f"><button class="btn secondary" id="f-fechar">Fechar</button></div>
+    </div></div>`;
+
+  const papelSel = document.getElementById('f-papel');
+  papelSel.value = u.papel;
+  document.getElementById('f-fechar').onclick = () => (root.innerHTML = '');
+  document.getElementById('f-salvar').onclick = async () => {
+    const corpo = {
+      papel: papelSel.value,
+      crm: document.getElementById('f-crm').value,
+      cpf: document.getElementById('f-cpf').value,
+      matricula: document.getElementById('f-matricula').value,
+    };
+    const s = document.getElementById('f-senha').value;
+    if (s) corpo.senha = s;
+    try { await api.put('/api/usuarios/' + id, corpo); toast('Dados salvos'); }
+    catch (e) { toast(e.message, true); }
+  };
+  document.getElementById('f-upload').onclick = async () => {
+    const tipo = document.getElementById('f-tipo').value.trim();
+    const arq = document.getElementById('f-arq').files[0];
+    if (!tipo) return toast('Informe o tipo do documento', true);
+    if (!arq) return toast('Escolha um arquivo', true);
+    const dados_base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(arq); });
+    try {
+      await api.post(`/api/usuarios/${id}/documentos`, { tipo, nome_orig: arq.name, dados_base64 });
+      toast('Documento anexado');
+      abrirFicha(id);
+    } catch (e) { toast(e.message, true); }
+  };
+  root.querySelectorAll('[data-deldoc]').forEach((b) => {
+    b.onclick = async () => {
+      await api.del(`/api/usuarios/${id}/documentos/${b.dataset.deldoc}`);
+      abrirFicha(id);
     };
   });
 }
