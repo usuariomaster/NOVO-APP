@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import db, { registrarHistorico, ehSimulacao } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
@@ -26,7 +26,9 @@ function montarCfg(cfgRow) {
 const router = Router();
 router.use(exigirLogin);
 
-const DIR_COMPROVANTES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'comprovantes');
+const DIR_DADOS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
+const DIR_COMPROVANTES = join(DIR_DADOS, 'comprovantes');
+const DIR_DOCS = join(DIR_DADOS, 'documentos');
 
 const SELECT_PROC = `
   SELECT p.*, u.nome AS perito_nome
@@ -143,9 +145,13 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
   const mock = ehSimulacao();
   if (!cfgRow && !mock) return res.status(400).json({ erro: 'Cadastre a configuração do SEI primeiro.' });
 
+  // Pasta própria do processo para arquivar os PDFs.
+  const dirProc = join(DIR_DOCS, `proc-${proc.id}`);
+  try { mkdirSync(dirProc, { recursive: true }); } catch { /* ignora */ }
+
   let r;
   try {
-    r = await detalharProcessoNoSei(montarCfg(cfgRow), { processoId: proc.id, numeroSei: proc.numero_sei }, mock);
+    r = await detalharProcessoNoSei(montarCfg(cfgRow), { processoId: proc.id, numeroSei: proc.numero_sei, dir: dirProc }, mock);
   } catch (e) {
     return res.status(502).json({ erro: e.message, debug: e.debug || null });
   }
@@ -160,12 +166,20 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
      WHERE id = ?`
   ).run(r.tipo || null, r.interessado || null, r.especificacao || null, proc.id);
 
-  // Substitui a lista de documentos.
+  // Substitui a lista de documentos (com conteúdo/arquivo).
+  let comPdf = 0;
+  let comTexto = 0;
   if (Array.isArray(r.documentos) && r.documentos.length) {
     db.prepare('DELETE FROM documentos WHERE processo_id = ?').run(proc.id);
-    const ins = db.prepare('INSERT INTO documentos (processo_id, numero, tipo, data, link_sei) VALUES (?, ?, ?, ?, ?)');
+    const ins = db.prepare(
+      'INSERT INTO documentos (processo_id, numero, tipo, data, link_sei, conteudo, arquivo) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
     const tx = db.transaction((lista) => {
-      for (const d of lista) ins.run(proc.id, d.numero ?? null, d.tipo ?? null, d.data ?? null, d.link_sei ?? null);
+      for (const d of lista) {
+        ins.run(proc.id, d.numero ?? null, d.tipo ?? null, d.data ?? null, d.link_sei ?? null, d.conteudo ?? null, d.arquivo ?? null);
+        if (d.arquivo) comPdf++;
+        if (d.conteudo) comTexto++;
+      }
     });
     tx(r.documentos);
   }
@@ -187,6 +201,8 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     ok: true,
     modo: r.modo,
     documentos: Array.isArray(r.documentos) ? r.documentos.length : 0,
+    comPdf,
+    comTexto,
     interessado: r.interessado || null,
     tipo: r.tipo || null,
     especificacao: r.especificacao || null,
@@ -194,6 +210,21 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     amostraDoc: r.amostraDoc || null,
     debug: r.debug || null,
   });
+});
+
+// Baixa/serve o PDF arquivado de um documento.
+router.get('/:id/documento/:docId/arquivo', (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+    return res.status(403).json({ erro: 'Sem permissão' });
+  }
+  const doc = db.prepare('SELECT * FROM documentos WHERE id = ? AND processo_id = ?').get(req.params.docId, proc.id);
+  if (!doc?.arquivo) return res.status(404).json({ erro: 'Documento sem PDF arquivado' });
+  const nome = String(doc.arquivo).replace(/[^a-zA-Z0-9._-]/g, '');
+  const caminho = join(DIR_DOCS, `proc-${proc.id}`, nome);
+  if (!existsSync(caminho)) return res.status(404).json({ erro: 'Arquivo não encontrado' });
+  res.sendFile(caminho);
 });
 
 // Envia a resposta de volta ao SEI (operador ou admin).

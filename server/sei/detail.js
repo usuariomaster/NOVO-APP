@@ -7,6 +7,8 @@
 // Como cada SEI mostra os detalhes de forma um pouco diferente,
 // também coletamos uma AMOSTRA de texto para calibração.
 // ============================================================
+import fs from 'node:fs';
+import { join } from 'node:path';
 import { SEL, abrirNavegador, autenticar, salvarDiagnostico } from './scraper.js';
 
 // Abre o processo pelo número usando a pesquisa rápida do SEI.
@@ -32,18 +34,36 @@ async function abrirProcesso(page, baseUrl, numeroSei) {
   await page.waitForTimeout(1500);
 }
 
-// Localiza o quadro (frame) da árvore de documentos do processo.
-function acharArvore(page) {
+// Localiza o quadro (frame) da árvore de documentos — o que tiver mais
+// links com número de documento (6 a 9 dígitos).
+async function acharArvore(page) {
+  let melhor = null;
+  let maxN = 0;
   for (const frame of page.frames()) {
-    if (/arvore/i.test(frame.name() + ' ' + frame.url())) return frame;
+    try {
+      const n = await frame.$$eval('a', (els) =>
+        els.filter((el) => /\d{6,9}/.test((el.textContent || '').trim())).length
+      );
+      if (n > maxN) { maxN = n; melhor = frame; }
+    } catch { /* ignora */ }
   }
-  return null;
+  return melhor;
+}
+
+// Localiza o quadro de conteúdo do documento (procedimento_visualizar).
+function acharConteudo(page) {
+  const frames = page.frames();
+  return (
+    frames.find((f) => /documento_visualizar/i.test(f.url())) ||
+    frames.find((f) => /procedimento_visualizar/i.test(f.url())) ||
+    null
+  );
 }
 
 // Coleta os documentos a partir da árvore do processo, filtrando o lixo
 // (nomes de setores, "Fechar", "Link para Acesso Direto", número do processo).
 async function coletarDocumentos(page) {
-  const arvore = acharArvore(page);
+  const arvore = await acharArvore(page);
   if (!arvore) return [];
   let itens = [];
   try {
@@ -84,7 +104,7 @@ async function coletarDocumentos(page) {
 // Abre o primeiro documento e captura uma amostra da tela do documento,
 // para calibrar a leitura de conteúdo (texto do despacho / PDF).
 async function amostraDocumento(page) {
-  const arvore = acharArvore(page);
+  const arvore = await acharArvore(page);
   if (!arvore) return null;
   try {
     // clica no primeiro link que tenha número de documento
@@ -115,6 +135,67 @@ async function amostraDocumento(page) {
     } catch { /* ignora */ }
   }
   return partes.join('\n\n').slice(0, 8000);
+}
+
+// Abre cada documento na árvore e lê o conteúdo: para documentos gerados
+// no SEI (ex.: Despacho) guarda o TEXTO; para anexos (PDF) baixa o arquivo.
+async function extrairConteudos(page, baseUrl, docs, dir) {
+  const arvore = await acharArvore(page);
+  if (!arvore) return;
+  const limite = Math.min(docs.length, 30);
+
+  for (let i = 0; i < limite; i++) {
+    const doc = docs[i];
+    try {
+      // Clica no documento (pelo número) dentro da árvore.
+      const link = arvore.locator(`a:has-text("${doc.numero}")`).first();
+      if (!(await link.count())) continue;
+      await link.click({ timeout: 10000 });
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(900);
+
+      const conteudo = acharConteudo(page);
+      if (!conteudo) continue;
+
+      // Procura um PDF embutido (anexos) e/ou o texto (documentos gerados).
+      let pdfSrc = null;
+      let texto = '';
+      for (const f of [conteudo, ...conteudo.childFrames()]) {
+        try {
+          const info = await f.evaluate(() => {
+            const el = document.querySelector('embed[src],object[data],iframe[src]');
+            const src = el ? (el.getAttribute('src') || el.getAttribute('data') || '') : '';
+            const txt = document.body ? document.body.innerText.trim() : '';
+            return { src, txt };
+          });
+          if (info.src && !pdfSrc) pdfSrc = info.src;
+          if (info.txt && info.txt.length > texto.length) texto = info.txt;
+        } catch { /* ignora */ }
+      }
+
+      // Baixa o PDF, se houver.
+      if (pdfSrc) {
+        try {
+          const abs = new URL(pdfSrc, baseUrl.replace(/\/?$/, '/')).href;
+          const resp = await page.context().request.get(abs, { timeout: 30000 });
+          if (resp.ok()) {
+            const buf = Buffer.from(await resp.body());
+            const ct = (resp.headers()['content-type'] || '').toLowerCase();
+            if (ct.includes('pdf') || buf.slice(0, 4).toString('latin1') === '%PDF') {
+              const nome = `doc-${doc.numero}.pdf`;
+              fs.writeFileSync(join(dir, nome), buf);
+              doc.arquivo = nome;
+            }
+          }
+        } catch { /* ignora */ }
+      }
+
+      // Guarda o texto (útil para despachos/documentos gerados no SEI).
+      if (texto && texto.length > 20) {
+        doc.conteudo = texto.slice(0, 20000);
+      }
+    } catch { /* segue para o próximo documento */ }
+  }
 }
 
 // Tenta ler interessado/tipo/especificação a partir do texto das telas.
@@ -159,7 +240,7 @@ async function coletarAmostra(page) {
   return partes.join('\n\n').slice(0, 8000);
 }
 
-// dados = { processoId, numeroSei }
+// dados = { processoId, numeroSei, dir }  (dir = pasta para salvar os PDFs)
 export async function detalharProcessoNoSei(cfg, dados, mock) {
   if (mock) {
     await new Promise((r) => setTimeout(r, 300));
@@ -169,8 +250,8 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
       tipo: 'Perícia Médica',
       especificacao: 'Solicitação de perícia para readaptação funcional',
       documentos: [
-        { numero: '0012345', tipo: 'Requerimento', link_sei: '' },
-        { numero: '0012346', tipo: 'Laudo Médico', link_sei: '' },
+        { numero: '0012345', tipo: 'Requerimento', link_sei: '', conteudo: 'Conteúdo simulado do requerimento.' },
+        { numero: '0012346', tipo: 'Laudo Médico', link_sei: '', conteudo: null },
       ],
       amostra: null,
     };
@@ -187,7 +268,10 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
     const meta = await coletarMetadados(page);
     const amostra = await coletarAmostra(page);
     const debug = await salvarDiagnostico(page, `debug-processo`);
-    // Abre um documento e captura como o SEI mostra o conteúdo (calibração).
+    // Abre cada documento: lê o texto (despachos) e baixa os PDFs (anexos).
+    if (dados.dir) {
+      await extrairConteudos(page, auth.baseUrl, documentos, dados.dir);
+    }
     const amostraDoc = await amostraDocumento(page);
     return { modo: 'sei', ...meta, documentos, amostra, amostraDoc, debug };
   } catch (e) {

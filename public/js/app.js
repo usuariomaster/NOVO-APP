@@ -345,8 +345,17 @@ async function renderProcessoDetalhe(id) {
   const isPerito = usuario.papel === 'perito';
 
   const docs = p.documentos.length
-    ? `<ul style="margin:0;padding-left:18px">${p.documentos.map((d) => `<li>${esc(d.tipo || 'Documento')} ${esc(d.numero || '')} <span class="muted">${esc(d.data || '')}</span></li>`).join('')}</ul>`
-    : '<span class="muted">Nenhum documento importado.</span>';
+    ? p.documentos.map((d) => `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <b>${esc(d.tipo || 'Documento')}</b>
+            <span class="muted">${esc(d.numero || '')}</span>
+            ${d.arquivo ? `<a class="btn secondary sm" href="/api/processos/${p.id}/documento/${d.id}/arquivo" target="_blank" rel="noopener">📥 Baixar PDF</a>` : ''}
+            ${d.conteudo ? `<button class="btn secondary sm" data-toggle="doc-${d.id}">📄 Ver texto</button>` : ''}
+          </div>
+          ${d.conteudo ? `<div id="doc-${d.id}" style="display:none;white-space:pre-wrap;background:var(--surface-2);padding:12px;border-radius:8px;margin-top:8px;font-size:13px;max-height:320px;overflow:auto">${esc(d.conteudo)}</div>` : ''}
+        </div>`).join('')
+    : '<span class="muted">Nenhum documento. Use “Buscar conteúdo no SEI”.</span>';
 
   const timeline = p.historico.length
     ? `<ul class="timeline">${p.historico.map((h) => `
@@ -474,6 +483,14 @@ function renderAcoes(p, isOper, isPerito) {
 function ligarAcoes(p, isOper, isPerito) {
   const recarrega = () => renderProcessoDetalhe(p.id);
 
+  // Mostra/esconde o texto de cada documento.
+  document.querySelectorAll('[data-toggle]').forEach((b) => {
+    b.onclick = () => {
+      const alvo = document.getElementById(b.dataset.toggle);
+      if (alvo) alvo.style.display = alvo.style.display === 'block' ? 'none' : 'block';
+    };
+  });
+
   // Editar dados (operador)
   const btnEditar = document.getElementById('btn-editar');
   if (btnEditar) btnEditar.onclick = async () => {
@@ -504,23 +521,23 @@ function ligarAcoes(p, isOper, isPerito) {
     btnDetalhar.textContent = '⏳ Buscando no SEI…';
     try {
       const r = await api.post(`/api/processos/${p.id}/detalhar-sei`);
-      // No SEI real, sempre mostra o "raio-x" do documento aberto para
-      // calibrar a extração de conteúdo/PDF (enquanto isso não está pronto).
-      if (r.modo === 'sei') {
-        const box = (titulo, txt) => txt
+      const pdf = r.comPdf || 0;
+      const txt = r.comTexto || 0;
+      // Se veio conteúdo, só avisa. Se não veio nada no SEI real, mostra o
+      // raio-x para calibração.
+      if (r.modo === 'sei' && pdf === 0 && txt === 0) {
+        const box = (titulo, t) => t
           ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
-             <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(txt)}</textarea>` : '';
+             <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(t)}</textarea>` : '';
         await modal({
-          titulo: 'Conteúdo buscado — falta liberar os PDFs',
+          titulo: 'Documentos listados, mas sem conteúdo ainda',
           okLabel: 'Fechar',
-          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s). Para eu liberar o
-            <b>texto dos despachos</b> e o <b>download dos PDFs</b>, preciso ver como o SEI
-            mostra um documento aberto.</p>
-            <p class="muted">👉 Clique no quadro abaixo, selecione tudo (Ctrl+A), copie e <b>cole no chat do suporte</b>:</p>
-            ${box('Raio-x do DOCUMENTO aberto:', r.amostraDoc) || box('Raio-x do processo:', r.amostra) || '<i>Sem amostra desta vez.</i>'}`,
+          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s), mas não consegui ler o texto/PDF.</p>
+            <p class="muted">👉 Clique no quadro, Ctrl+A, copie e <b>cole no chat do suporte</b>:</p>
+            ${box('Raio-x do documento:', r.amostraDoc) || box('Raio-x do processo:', r.amostra) || '<i>Sem amostra.</i>'}`,
         });
       } else {
-        toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
+        toast(`Conteúdo atualizado: ${r.documentos} doc(s), ${pdf} PDF(s), ${txt} com texto.`);
       }
       recarrega();
     } catch (e) {
