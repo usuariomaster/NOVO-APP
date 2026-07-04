@@ -270,6 +270,10 @@ export async function extrairProcessos(cfg, mock) {
     const { processos, amostra } = await extrairControleProcessos(page, auth.baseUrl, cfg);
     // Guarda um print do "Controle de Processos" para conferência/calibração.
     const debug = await salvarDiagnostico(page, 'debug-controle');
+    // Salva também a amostra em texto, acessível por URL para calibração.
+    if (amostra) {
+      try { fs.writeFileSync(join(DIR_DIAG, 'debug-amostra.txt'), amostra, 'utf8'); } catch { /* ignora */ }
+    }
     return { modo: 'sei', processos, debug, amostra };
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-extracao');
