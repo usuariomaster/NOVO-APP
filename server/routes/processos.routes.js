@@ -191,6 +191,7 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     tipo: r.tipo || null,
     especificacao: r.especificacao || null,
     amostra: r.amostra || null,
+    amostraDoc: r.amostraDoc || null,
     debug: r.debug || null,
   });
 });

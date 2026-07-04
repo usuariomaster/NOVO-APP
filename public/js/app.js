@@ -504,14 +504,21 @@ function ligarAcoes(p, isOper, isPerito) {
     btnDetalhar.textContent = '⏳ Buscando no SEI…';
     try {
       const r = await api.post(`/api/processos/${p.id}/detalhar-sei`);
-      const semNada = r.modo === 'sei' && r.documentos === 0 && !r.interessado && !r.tipo && !r.especificacao;
-      if (semNada && (r.amostra || r.debug)) {
-        const amostra = r.amostra
-          ? `<p class="muted" style="margin-top:12px"><b>Copie este texto e mande para o suporte</b> (para calibrar a leitura do conteúdo):</p>
-             <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.amostra)}</textarea>`
-          : '';
-        const img = r.debug ? `<img src="/api/sei/debug/${encodeURIComponent(r.debug)}" style="width:100%;border:1px solid var(--border);border-radius:8px;margin-top:10px" />` : '';
-        await modal({ titulo: 'Abri o processo, mas não reconheci o conteúdo', okLabel: 'Fechar', corpo: `<p>O robô abriu o processo no SEI, mas a tela de detalhes é diferente do padrão.</p>${amostra}${img}` });
+      // No SEI real, sempre mostra o "raio-x" do documento aberto para
+      // calibrar a extração de conteúdo/PDF (enquanto isso não está pronto).
+      if (r.modo === 'sei') {
+        const box = (titulo, txt) => txt
+          ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
+             <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(txt)}</textarea>` : '';
+        await modal({
+          titulo: 'Conteúdo buscado — falta liberar os PDFs',
+          okLabel: 'Fechar',
+          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s). Para eu liberar o
+            <b>texto dos despachos</b> e o <b>download dos PDFs</b>, preciso ver como o SEI
+            mostra um documento aberto.</p>
+            <p class="muted">👉 Clique no quadro abaixo, selecione tudo (Ctrl+A), copie e <b>cole no chat do suporte</b>:</p>
+            ${box('Raio-x do DOCUMENTO aberto:', r.amostraDoc) || box('Raio-x do processo:', r.amostra) || '<i>Sem amostra desta vez.</i>'}`,
+        });
       } else {
         toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
       }
