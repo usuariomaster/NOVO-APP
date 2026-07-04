@@ -128,6 +128,61 @@ router.put('/:id', exigirPapel('operador', 'admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+// Cria um processo FÍSICO (não-SEI) manualmente (operador ou admin).
+router.post('/fisico', exigirPapel('operador', 'admin'), (req, res) => {
+  const { numero_sei, interessado, especificacao, tipo, secretaria_destino, prioridade, prazo } = req.body || {};
+  if (!interessado && !especificacao && !numero_sei) {
+    return res.status(400).json({ erro: 'Informe ao menos o interessado/servidor ou o assunto' });
+  }
+  // Gera um número interno se não informado.
+  let numero = (numero_sei || '').trim();
+  if (!numero) {
+    const ano = new Date().toISOString().slice(0, 4);
+    const n = db.prepare(`SELECT COUNT(*) AS c FROM processos WHERE fisico = 1`).get().c + 1;
+    numero = `FIS-${ano}-${String(n).padStart(4, '0')}`;
+  }
+  if (db.prepare('SELECT id FROM processos WHERE numero_sei = ?').get(numero)) {
+    return res.status(409).json({ erro: 'Já existe um processo com esse número' });
+  }
+  const info = db.prepare(
+    `INSERT INTO processos (numero_sei, tipo, interessado, especificacao, unidade_origem, secretaria_destino,
+       prioridade, prazo, fisico, status, operador_id)
+     VALUES (?, ?, ?, ?, 'Perícia (físico)', ?, ?, ?, 1, 'em_controle', ?)`
+  ).run(
+    numero, tipo || null, interessado || null, especificacao || null, secretaria_destino || null,
+    prioridade || 'normal', prazo || null, req.usuario.id
+  );
+  registrarHistorico({ processoId: info.lastInsertRowid, usuario: req.usuario, acao: 'incluido_fisico', detalhe: 'Processo físico incluído manualmente' });
+  res.status(201).json({ id: info.lastInsertRowid, numero_sei: numero });
+});
+
+// Página imprimível do despacho (abre no navegador para imprimir/anexar).
+router.get('/:id/despacho-impressao', (req, res) => {
+  const proc = db.prepare(SELECT_PROC + ' WHERE p.id = ?').get(req.params.id);
+  if (!proc) return res.status(404).send('Processo não encontrado');
+  const d = db.prepare('SELECT * FROM despachos WHERE processo_id = ? ORDER BY id DESC LIMIT 1').get(proc.id);
+  const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>Despacho ${esc(proc.numero_sei)}</title>
+    <style>body{font-family:Georgia,'Times New Roman',serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
+    h1{font-size:18px;text-align:center}.cab{text-align:center;margin-bottom:24px}.meta{font-size:14px;margin:16px 0;border:1px solid #ccc;padding:12px;border-radius:6px}
+    .meta b{display:inline-block;width:130px}.corpo{white-space:pre-wrap;margin:24px 0;text-align:justify}
+    .ass{margin-top:80px;text-align:center}.linha{border-top:1px solid #000;width:280px;margin:0 auto;padding-top:6px}
+    @media print{.noprint{display:none}}</style></head><body>
+    <div class="cab"><h1>PERÍCIA / JUNTA MÉDICA — DESPACHO</h1></div>
+    <div class="meta">
+      <div><b>Processo:</b> ${esc(proc.numero_sei)}${proc.fisico ? ' (físico)' : ''}</div>
+      <div><b>Interessado:</b> ${esc(proc.interessado || '—')}</div>
+      <div><b>Assunto:</b> ${esc(proc.especificacao || proc.tipo || '—')}</div>
+      <div><b>Perito:</b> ${esc(proc.perito_nome || '—')}</div>
+      <div><b>Conclusão:</b> ${esc(d?.conclusao || '—')}</div>
+    </div>
+    <div class="corpo">${esc(d?.texto || '(sem texto de despacho)')}</div>
+    <div class="ass"><div class="linha">${esc(proc.perito_nome || 'Perito')}</div></div>
+    <div class="noprint" style="text-align:center;margin-top:32px"><button onclick="print()" style="padding:10px 20px;font-size:15px">🖨 Imprimir</button></div>
+  </body></html>`);
+});
+
 // Exclui um processo (operador ou admin). Remove documentos, despachos e histórico.
 router.delete('/:id', exigirPapel('operador', 'admin'), (req, res) => {
   const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);

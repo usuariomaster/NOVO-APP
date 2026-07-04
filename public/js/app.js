@@ -88,6 +88,7 @@ const rotas = {
   '': renderPainel,
   '#painel': renderPainel,
   '#processos': renderProcessos,
+  '#mensageiro': renderMensageiro,
   '#usuarios': renderUsuarios,
   '#sei': renderConfigSei,
 };
@@ -125,6 +126,7 @@ function shell(conteudo) {
   const nav = [
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#processos">📁 ${isPerito ? 'Meus processos' : 'Processos'}</a>`,
+    isOper ? `<a href="#mensageiro">🚚 Mensageiro</a>` : '',
     isAdmin ? `<a href="#usuarios">👥 Usuários</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
   ].join('');
@@ -297,13 +299,17 @@ async function renderPainel() {
 async function renderProcessos() {
   shell('<div class="empty">Carregando…</div>');
   const isOper = ehOper();
-  const botaoExtrair = isOper ? `<button class="btn" id="btn-extrair">⬇️ Extrair do SEI</button>` : '';
+  const botoes = isOper
+    ? `<div style="display:flex;gap:8px">
+         <button class="btn secondary" id="btn-fisico">＋ Processo físico</button>
+         <button class="btn" id="btn-extrair">⬇️ Extrair do SEI</button>
+       </div>` : '';
 
   setMain(`
     <div class="page-head">
       <div><h2>${isOper ? 'Controle de Processos' : 'Meus Processos'} <span id="contador-proc" class="badge pr-normal" style="font-size:14px">…</span></h2>
-      <div class="desc">${isOper ? 'Processos extraídos do SEI e sua distribuição.' : 'Processos distribuídos a você para despacho.'}</div></div>
-      ${botaoExtrair}
+      <div class="desc">${isOper ? 'Processos do SEI e físicos, e sua distribuição.' : 'Processos distribuídos a você para despacho.'}</div></div>
+      ${botoes}
     </div>
     <div class="toolbar">
       <input type="search" id="busca" placeholder="Buscar nº, interessado, assunto…" />
@@ -315,7 +321,28 @@ async function renderProcessos() {
     <div class="card"><div id="lista-proc"><div class="empty">Carregando…</div></div></div>
   `);
 
-  if (isOper) document.getElementById('btn-extrair').onclick = extrairDoSei;
+  if (isOper) {
+    document.getElementById('btn-extrair').onclick = extrairDoSei;
+    document.getElementById('btn-fisico').onclick = async () => {
+      const r = await modal({
+        titulo: 'Novo processo físico',
+        okLabel: 'Criar',
+        corpo: `
+          <div class="field"><label>Nº do processo (deixe vazio para gerar automático)</label><input name="numero_sei"></div>
+          <div class="field"><label>Interessado / Servidor</label><input name="interessado"></div>
+          <div class="field"><label>Assunto</label><input name="especificacao"></div>
+          <div class="row">
+            <div class="field"><label>Secretaria de destino</label><input name="secretaria_destino" placeholder="ex.: SEMAD"></div>
+            <div class="field"><label>Prioridade</label><select name="prioridade">
+              ${PRIORIDADES.map((x) => `<option value="${x}" ${x === 'normal' ? 'selected' : ''}>${x}</option>`).join('')}
+            </select></div>
+          </div>`,
+      });
+      if (!r) return;
+      try { const c = await api.post('/api/processos/fisico', r); toast(`Processo físico criado: ${c.numero_sei}`); carregarLista('', ''); }
+      catch (e) { toast(e.message, true); }
+    };
+  }
   const busca = document.getElementById('busca');
   const filtro = document.getElementById('filtro-status');
   const recarregar = () => carregarLista(busca.value, filtro.value);
@@ -348,7 +375,7 @@ async function carregarLista(q, status) {
       <tbody>
         ${procs.map((p) => `
           <tr data-id="${p.id}">
-            <td class="num-proc">${esc(p.numero_sei)}</td>
+            <td class="num-proc">${esc(p.numero_sei)} ${p.fisico ? '<span class="badge pr-alta" style="font-size:11px">físico</span>' : ''}</td>
             <td>${esc(p.especificacao || p.tipo || '—')}<br><span class="muted">${esc(p.interessado || '')}</span></td>
             <td class="muted">${esc(p.unidade_origem || '—')}</td>
             <td>${esc(p.perito_nome || '—')}</td>
@@ -431,6 +458,88 @@ async function extrairDoSei() {
     btn.textContent = '⬇️ Extrair do SEI';
   }
 }
+
+// ============================================================
+// Mensageiro (remessas de processos físicos)
+// ============================================================
+async function renderMensageiro() {
+  shell('<div class="empty">Carregando…</div>');
+  const [prontos, remessas] = await Promise.all([
+    api.get('/api/remessas/prontos'),
+    api.get('/api/remessas'),
+  ]);
+
+  // Agrupa prontos por secretaria.
+  const porSec = {};
+  for (const p of prontos) (porSec[p.secretaria_destino || 'Sem secretaria'] ||= []).push(p);
+
+  const blocosProntos = Object.keys(porSec).length
+    ? Object.entries(porSec).map(([sec, lista]) => `
+        <div class="card">
+          <div class="card-h">${esc(sec)} — ${lista.length} pronto(s)
+            <button class="btn sm" data-remessa="${esc(sec)}">🚚 Criar remessa</button></div>
+          <div class="card-b">
+            ${lista.map((p) => `<label style="display:block;padding:4px 0">
+              <input type="checkbox" class="chk-${cssId(sec)}" value="${p.id}" checked>
+              <b class="num-proc">${esc(p.numero_sei)}</b> — ${esc(p.interessado || '—')} <span class="muted">${esc(p.especificacao || '')}</span>
+            </label>`).join('')}
+          </div>
+        </div>`).join('')
+    : '<div class="card"><div class="empty">Nenhum processo físico conferido aguardando envio.</div></div>';
+
+  const listaRemessas = remessas.length
+    ? `<table><thead><tr><th>#</th><th>Secretaria</th><th>Mensageiro</th><th>Qtd</th><th>Emissão</th><th>Retirada</th><th></th></tr></thead>
+        <tbody>${remessas.map((r) => `<tr>
+          <td>${r.id}</td><td>${esc(r.secretaria)}</td><td>${esc(r.mensageiro || '—')}</td>
+          <td>${r.total}</td><td class="muted">${dataHora(r.criado_em)}</td>
+          <td>${r.retirada_em ? `<span class="badge st-conferido">${esc(r.retirada_em)}</span>` : '<span class="badge st-em_pericia">aguardando</span>'}</td>
+          <td style="white-space:nowrap">
+            <a class="btn secondary sm" href="/api/remessas/${r.id}/relatorio" target="_blank" rel="noopener">🖨 Relatório</a>
+            ${r.retirada_em ? '' : `<button class="btn ok sm" data-retirada="${r.id}">✔ Registrar retirada</button>`}
+          </td></tr>`).join('')}</tbody></table>`
+    : '<div class="empty">Nenhuma remessa ainda.</div>';
+
+  setMain(`
+    <div class="page-head"><div><h2>Mensageiro</h2>
+      <div class="desc">Envio de processos físicos às secretarias. Gere a remessa, imprima o relatório e registre a retirada.</div></div></div>
+    <h3 style="margin:0 0 8px">Prontos para enviar</h3>
+    ${blocosProntos}
+    <h3 style="margin:24px 0 8px">Remessas</h3>
+    <div class="card">${listaRemessas}</div>
+  `);
+
+  document.querySelectorAll('[data-remessa]').forEach((b) => {
+    b.onclick = async () => {
+      const sec = b.dataset.remessa;
+      const ids = [...document.querySelectorAll('.chk-' + cssId(sec) + ':checked')].map((c) => Number(c.value));
+      if (!ids.length) return toast('Selecione ao menos um processo', true);
+      const r = await modal({ titulo: `Criar remessa — ${sec}`, okLabel: 'Criar remessa',
+        corpo: `<p>${ids.length} processo(s) para <b>${esc(sec)}</b>.</p>
+          <div class="field"><label>Mensageiro (opcional)</label><input name="mensageiro"></div>` });
+      if (!r) return;
+      try {
+        await api.post('/api/remessas', { secretaria: sec, mensageiro: r.mensageiro, processo_ids: ids });
+        toast('Remessa criada — imprima o relatório'); renderMensageiro();
+      } catch (e) { toast(e.message, true); }
+    };
+  });
+
+  document.querySelectorAll('[data-retirada]').forEach((b) => {
+    b.onclick = async () => {
+      const hoje = new Date().toISOString().slice(0, 10);
+      const r = await modal({ titulo: 'Registrar retirada do mensageiro', okLabel: 'Confirmar retirada', okClasse: 'btn ok',
+        corpo: `<p>Ao confirmar, os processos desta remessa são <b>encerrados na perícia</b> e saem do painel.</p>
+          <div class="row">
+            <div class="field"><label>Data da retirada</label><input name="data" type="date" value="${hoje}"></div>
+            <div class="field"><label>Mensageiro</label><input name="mensageiro"></div>
+          </div>` });
+      if (!r) return;
+      try { const x = await api.post(`/api/remessas/${b.dataset.retirada}/retirada`, r); toast(`Retirada registrada — ${x.encerrados} processo(s) encerrado(s)`); renderMensageiro(); }
+      catch (e) { toast(e.message, true); }
+    };
+  });
+}
+function cssId(s) { return String(s).replace(/[^a-zA-Z0-9]/g, ''); }
 
 // ============================================================
 // Detalhe do processo
@@ -579,8 +688,9 @@ function renderAreaDespacho(p, isOper, isPerito) {
 
 function renderAcoes(p, isOper, isPerito) {
   const acoes = [];
+  const temDespacho = p.despacho && (p.despacho.texto || p.despacho.arquivo);
   if (isOper) {
-    acoes.push(`<button class="btn secondary" id="a-detalhar">🔎 Buscar conteúdo no SEI</button>`);
+    if (!p.fisico) acoes.push(`<button class="btn secondary" id="a-detalhar">🔎 Buscar conteúdo no SEI</button>`);
     if (['em_controle', 'distribuido', 'devolvido'].includes(p.status)) {
       acoes.push(`<button class="btn" id="a-distribuir">👤 ${p.perito_id ? 'Redistribuir' : 'Distribuir'} a um perito</button>`);
     }
@@ -588,12 +698,21 @@ function renderAcoes(p, isOper, isPerito) {
       acoes.push(`<button class="btn ok" id="a-aprovar">✔ Aprovar (conferido)</button>`);
       acoes.push(`<button class="btn warn" id="a-devolver">↩ Devolver ao perito</button>`);
     }
-    if (p.status === 'conferido') {
+    if (temDespacho) {
+      acoes.push(`<a class="btn secondary" href="/api/processos/${p.id}/despacho-impressao" target="_blank" rel="noopener">🖨 Imprimir despacho</a>`);
+    }
+    if (p.status === 'conferido' && !p.fisico) {
       acoes.push(`<button class="btn" id="a-enviar-sei">📤 Enviar resposta ao SEI</button>`);
+    }
+    if (p.status === 'conferido' && p.fisico) {
+      acoes.push(`<span class="muted">Físico conferido — pronto para o mensageiro (aba 🚚 Mensageiro).</span>`);
     }
     if (p.status === 'enviado_sei') {
       acoes.push(`<button class="btn secondary" id="a-concluir">🏁 Concluir processo</button>`);
     }
+  }
+  if (isPerito && temDespacho) {
+    acoes.push(`<a class="btn secondary" href="/api/processos/${p.id}/despacho-impressao" target="_blank" rel="noopener">🖨 Imprimir despacho</a>`);
   }
   if (!acoes.length) acoes.push('<span class="muted">Nenhuma ação disponível neste momento.</span>');
   return acoes.join('<div style="height:10px"></div>');

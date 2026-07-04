@@ -10,6 +10,7 @@ import usersRoutes from './routes/users.routes.js';
 import seiRoutes from './routes/sei.routes.js';
 import processosRoutes from './routes/processos.routes.js';
 import despachosRoutes from './routes/despachos.routes.js';
+import remessasRoutes from './routes/remessas.routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +33,7 @@ app.use('/api/usuarios', usersRoutes);
 app.use('/api/sei', seiRoutes);
 app.use('/api/processos', processosRoutes);
 app.use('/api/despachos', despachosRoutes);
+app.use('/api/remessas', remessasRoutes);
 
 // Front-end estático
 app.use(express.static(join(__dirname, '..', 'public')));

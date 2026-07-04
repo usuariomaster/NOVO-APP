@@ -137,6 +137,21 @@ garantirColuna('processos', 'conteudo_em', 'conteudo_em TEXT');
 garantirColuna('processos', 'pdf_processo', 'pdf_processo TEXT');
 // Quando o processo foi distribuído a um perito (para contar o prazo)
 garantirColuna('processos', 'distribuido_em', 'distribuido_em TEXT');
+// Processos FÍSICOS (não tramitam no SEI): inclusão manual pelo operador
+garantirColuna('processos', 'fisico', 'fisico INTEGER NOT NULL DEFAULT 0');
+garantirColuna('processos', 'secretaria_destino', 'secretaria_destino TEXT');
+garantirColuna('processos', 'remessa_id', 'remessa_id INTEGER');
+
+// Remessas do mensageiro (processos físicos enviados às secretarias)
+db.exec(`
+CREATE TABLE IF NOT EXISTS remessas (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  secretaria   TEXT NOT NULL,
+  mensageiro   TEXT,
+  criado_por   TEXT,
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now')),
+  retirada_em  TEXT
+);`);
 // Dados do servidor/perito
 garantirColuna('usuarios', 'cpf', 'cpf TEXT');
 garantirColuna('usuarios', 'matricula', 'matricula TEXT');
