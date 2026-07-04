@@ -1,9 +1,15 @@
 import { Router } from 'express';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import db, { registrarHistorico } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
+import { descriptografar } from '../sei/crypto.js';
+import { lancarDespachoNoSei } from '../sei/writer.js';
 
 const router = Router();
 router.use(exigirLogin);
+
+const DIR_COMPROVANTES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'comprovantes');
 
 const SELECT_PROC = `
   SELECT p.*, u.nome AS perito_nome
@@ -111,18 +117,78 @@ router.post('/:id/distribuir', exigirPapel('operador', 'admin'), (req, res) => {
 });
 
 // Envia a resposta de volta ao SEI (operador ou admin).
-router.post('/:id/enviar-sei', exigirPapel('operador', 'admin'), (req, res) => {
+// O robô de escrita lança o despacho automaticamente na tela do SEI.
+router.post('/:id/enviar-sei', exigirPapel('operador', 'admin'), async (req, res) => {
   const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
   if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
   if (proc.status !== 'conferido') {
     return res.status(409).json({ erro: 'O despacho precisa estar conferido/aprovado antes de enviar ao SEI' });
   }
-  // Observação: o lançamento efetivo do despacho no SEI é feito pelo
-  // operador na tela do SEI (o robô oficial de escrita depende de
-  // integração liberada pelo órgão). Aqui registramos o envio.
+  const despacho = db.prepare('SELECT * FROM despachos WHERE processo_id = ? ORDER BY id DESC LIMIT 1').get(proc.id);
+  if (!despacho?.texto) return res.status(400).json({ erro: 'Não há despacho aprovado para lançar no SEI' });
+
+  const cfgRow = db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
+  const mock = String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
+  if (!cfgRow && !mock) {
+    return res.status(400).json({ erro: 'Cadastre a configuração do SEI antes de lançar o despacho.' });
+  }
+  if (cfgRow && cfgRow.escrita === 0 && !mock) {
+    return res.status(409).json({ erro: 'A escrita automática está desativada nesta configuração do SEI.' });
+  }
+
+  const cfg = cfgRow
+    ? {
+        base_url: cfgRow.base_url,
+        orgao: cfgRow.orgao,
+        usuario: cfgRow.usuario,
+        senha: descriptografar(cfgRow.senha_cripto),
+        tipo_documento: cfgRow.tipo_documento,
+        nivel_acesso: cfgRow.nivel_acesso,
+        unidade_destino: cfgRow.unidade_destino,
+      }
+    : { base_url: process.env.SEI_BASE_URL || '', tipo_documento: 'Despacho', nivel_acesso: 'publico' };
+
+  let resultado;
+  try {
+    resultado = await lancarDespachoNoSei(cfg, {
+      processoId: proc.id,
+      numeroSei: proc.numero_sei,
+      texto: despacho.texto,
+      conclusao: despacho.conclusao,
+    });
+  } catch (e) {
+    registrarHistorico({
+      processoId: proc.id,
+      usuario: req.usuario,
+      acao: 'erro_envio_sei',
+      detalhe: e.message + (e.passos?.length ? ` (passos: ${e.passos.join(' → ')})` : ''),
+    });
+    return res.status(502).json({ erro: e.message, comprovante: e.comprovante || null });
+  }
+
+  db.prepare(`UPDATE despachos SET comprovante = ? WHERE id = ?`).run(resultado.comprovante || null, despacho.id);
   db.prepare(`UPDATE processos SET status = 'enviado_sei', atualizado_em = datetime('now') WHERE id = ?`).run(proc.id);
-  registrarHistorico({ processoId: proc.id, usuario: req.usuario, acao: 'enviado_sei', detalhe: 'Resposta devolvida ao SEI' });
-  res.json({ ok: true });
+  registrarHistorico({
+    processoId: proc.id,
+    usuario: req.usuario,
+    acao: 'enviado_sei',
+    detalhe: `Despacho lançado no SEI (${resultado.modo}) — ${resultado.passos.join(' → ')}`,
+  });
+  res.json({ ok: true, modo: resultado.modo, comprovante: resultado.comprovante });
+});
+
+// Serve o comprovante (print) do lançamento — apenas logados.
+router.get('/:id/comprovante', (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  if (req.usuario.papel === 'perito' && proc.perito_id !== req.usuario.id) {
+    return res.status(403).json({ erro: 'Sem permissão' });
+  }
+  const despacho = db.prepare('SELECT comprovante FROM despachos WHERE processo_id = ? ORDER BY id DESC LIMIT 1').get(proc.id);
+  if (!despacho?.comprovante) return res.status(404).json({ erro: 'Sem comprovante' });
+  // Impede path traversal: só o nome do arquivo é usado.
+  const nome = String(despacho.comprovante).replace(/[^a-zA-Z0-9._-]/g, '');
+  res.sendFile(join(DIR_COMPROVANTES, nome));
 });
 
 // Conclui o processo (arquiva no controle).

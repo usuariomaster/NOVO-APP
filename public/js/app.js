@@ -394,12 +394,16 @@ function renderAreaDespacho(p, isOper, isPerito) {
   }
   // Visualização do despacho (operador conferindo, ou já finalizado)
   if (d && d.texto) {
+    const comprovante = d.comprovante
+      ? `<div style="margin-top:12px"><a class="btn secondary sm" href="/api/processos/${p.id}/comprovante" target="_blank" rel="noopener">🧾 Ver comprovante do lançamento no SEI</a></div>`
+      : '';
     return `
       <div class="card">
         <div class="card-h">Despacho ${d.conclusao ? `— <strong>${esc(d.conclusao)}</strong>` : ''}</div>
         <div class="card-b">
           <div style="white-space:pre-wrap">${esc(d.texto)}</div>
           ${d.motivo_devolucao && d.status === 'devolvido' ? `<div class="error-msg" style="min-height:auto;margin-top:10px">↩ ${esc(d.motivo_devolucao)}</div>` : ''}
+          ${comprovante}
         </div>
       </div>`;
   }
@@ -494,18 +498,29 @@ function ligarAcoes(p, isOper, isPerito) {
     recarrega();
   };
 
-  // Enviar ao SEI
+  // Enviar ao SEI (lançamento automático pelo robô)
   const btnSei = document.getElementById('a-enviar-sei');
   if (btnSei) btnSei.onclick = async () => {
     const r = await modal({
-      titulo: 'Enviar resposta ao SEI',
-      okLabel: 'Confirmar envio',
-      corpo: `<p>Confirme que o despacho foi lançado no SEI para o processo <b>${esc(p.numero_sei)}</b>. Isto marca o processo como enviado.</p>`,
+      titulo: 'Lançar despacho no SEI',
+      okLabel: 'Lançar automaticamente',
+      corpo: `<p>O robô vai <b>logar no SEI</b> e lançar o despacho no processo
+        <b>${esc(p.numero_sei)}</b> automaticamente (incluir documento “Despacho”,
+        escrever o texto e salvar). Um comprovante em imagem será guardado.</p>
+        <p class="muted">Confirme que o despacho já foi conferido.</p>`,
     });
     if (!r) return;
-    await api.post(`/api/processos/${p.id}/enviar-sei`);
-    toast('Resposta registrada como enviada ao SEI');
-    recarrega();
+    btnSei.disabled = true;
+    btnSei.textContent = '⏳ Lançando no SEI…';
+    try {
+      const resp = await api.post(`/api/processos/${p.id}/enviar-sei`);
+      toast(resp.modo === 'simulacao' ? 'Despacho lançado (simulação)' : 'Despacho lançado no SEI');
+      recarrega();
+    } catch (e) {
+      toast(e.message, true);
+      btnSei.disabled = false;
+      btnSei.textContent = '📤 Enviar resposta ao SEI';
+    }
   };
 
   // Concluir
@@ -628,7 +643,17 @@ async function renderConfigSei() {
           <div class="field"><label>Unidade (infra_unidade_atual)</label><input name="unidade" placeholder="110001126"></div>
         </div>
         <div class="field"><label>Usuário SEI</label><input name="usuario"></div>
-        <div class="field"><label>Senha SEI</label><input name="senha" type="password"></div>`,
+        <div class="field"><label>Senha SEI</label><input name="senha" type="password"></div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:6px 0 16px">
+        <div style="font-weight:600;margin-bottom:10px">Lançamento automático do despacho</div>
+        <div class="row">
+          <div class="field"><label>Tipo de documento</label><input name="tipo_documento" value="Despacho"></div>
+          <div class="field"><label>Nível de acesso</label><select name="nivel_acesso">
+            <option value="publico">Público</option>
+            <option value="restrito">Restrito</option>
+          </select></div>
+        </div>
+        <div class="field"><label>Enviar processo à unidade (opcional)</label><input name="unidade_destino" placeholder="ex.: SEMUS ou sigla da unidade de destino"></div>`,
     });
     if (!r) return;
     try { await api.post('/api/sei/config', { ...r, padrao: 1 }); toast('Configuração salva'); renderConfigSei(); }

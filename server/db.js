@@ -95,6 +95,23 @@ CREATE INDEX IF NOT EXISTS idx_proc_perito ON processos(perito_id);
 CREATE INDEX IF NOT EXISTS idx_hist_proc ON historico(processo_id);
 `);
 
+// ------------------------------------------------------------
+// Migrações incrementais (adiciona colunas se ainda não existem)
+// ------------------------------------------------------------
+function garantirColuna(tabela, nome, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${tabela})`).all();
+  if (!cols.some((c) => c.name === nome)) {
+    db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${ddl}`);
+  }
+}
+// Comprovante (print) do lançamento automático do despacho no SEI
+garantirColuna('despachos', 'comprovante', 'comprovante TEXT');
+// Configuração da escrita automática no SEI
+garantirColuna('sei_config', 'escrita', 'escrita INTEGER NOT NULL DEFAULT 1');
+garantirColuna('sei_config', 'tipo_documento', "tipo_documento TEXT NOT NULL DEFAULT 'Despacho'");
+garantirColuna('sei_config', 'nivel_acesso', "nivel_acesso TEXT NOT NULL DEFAULT 'publico'");
+garantirColuna('sei_config', 'unidade_destino', 'unidade_destino TEXT');
+
 export function registrarHistorico({ processoId, usuario, acao, detalhe }) {
   db.prepare(
     `INSERT INTO historico (processo_id, usuario_id, usuario_nome, acao, detalhe)

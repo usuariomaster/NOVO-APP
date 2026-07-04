@@ -10,21 +10,30 @@ router.use(exigirLogin);
 // ---- Configurações do SEI (credenciais) — somente admin ----
 router.get('/config', exigirPapel('admin'), (req, res) => {
   const configs = db
-    .prepare('SELECT id, apelido, base_url, orgao, unidade, usuario, padrao, criado_em FROM sei_config ORDER BY padrao DESC, apelido')
+    .prepare(
+      `SELECT id, apelido, base_url, orgao, unidade, usuario, padrao,
+              escrita, tipo_documento, nivel_acesso, unidade_destino, criado_em
+       FROM sei_config ORDER BY padrao DESC, apelido`
+    )
     .all();
   res.json(configs); // nunca devolve a senha
 });
 
 router.post('/config', exigirPapel('admin'), (req, res) => {
-  const { apelido, base_url, orgao, unidade, usuario, senha, padrao } = req.body || {};
+  const {
+    apelido, base_url, orgao, unidade, usuario, senha, padrao,
+    escrita, tipo_documento, nivel_acesso, unidade_destino,
+  } = req.body || {};
   if (!apelido || !base_url || !usuario || !senha) {
     return res.status(400).json({ erro: 'Informe apelido, URL base, usuário e senha' });
   }
   if (padrao) db.prepare('UPDATE sei_config SET padrao = 0').run();
   const info = db
     .prepare(
-      `INSERT INTO sei_config (apelido, base_url, orgao, unidade, usuario, senha_cripto, padrao)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sei_config
+         (apelido, base_url, orgao, unidade, usuario, senha_cripto, padrao,
+          escrita, tipo_documento, nivel_acesso, unidade_destino)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       apelido.trim(),
@@ -33,7 +42,11 @@ router.post('/config', exigirPapel('admin'), (req, res) => {
       unidade || null,
       usuario.trim(),
       criptografar(senha),
-      padrao ? 1 : 0
+      padrao ? 1 : 0,
+      escrita === false ? 0 : 1,
+      (tipo_documento || 'Despacho').trim(),
+      (nivel_acesso || 'publico').trim(),
+      unidade_destino || null
     );
   res.status(201).json({ id: info.lastInsertRowid });
 });

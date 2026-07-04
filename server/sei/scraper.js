@@ -13,8 +13,37 @@
 // ponta sem credenciais.
 // ============================================================
 
-const MOCK = () => String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
-const HEADFUL = () => String(process.env.SEI_HEADFUL ?? 'false').toLowerCase() === 'true';
+export const MOCK = () => String(process.env.SEI_MOCK ?? 'true').toLowerCase() === 'true';
+export const HEADFUL = () => String(process.env.SEI_HEADFUL ?? 'false').toLowerCase() === 'true';
+
+// Seletores do SEI 4.x — centralizados para facilitar o ajuste caso a
+// instalação de Nova Iguaçu use um layout/tema diferente.
+export const SEL = {
+  loginUsuario: '#txtUsuario',
+  loginSenha: '#pwdSenha',
+  loginOrgao: '#selOrgao',
+  loginBotao: '#sbmAcessar, #Acessar, button[type="submit"], input[type="submit"]',
+  buscaRapida: '#txtPesquisaRapida',
+  frameArvore: 'ifrArvore',
+  frameVisualizacao: 'ifrVisualizacao',
+  linkTrabalhar: 'a[href*="procedimento_trabalhar"]',
+  incluirDocumento: 'a[href*="documento_escolher_tipo"], img[title="Incluir Documento"]',
+  campoTipoDocumento: '#txtFiltro, #tblSeries input[type=text]',
+  editorCorpo: 'body', // dentro do iframe do CKEditor
+  botaoSalvarDoc: '#btnSalvar, a[onclick*="salvar"], input[value="Salvar"]',
+  enviarProcesso: 'a[href*="procedimento_enviar"], img[title="Enviar Processo"]',
+};
+
+// Sobe o navegador do robô usando o Chromium do ambiente quando existir.
+export async function abrirNavegador() {
+  const { chromium } = await import('playwright');
+  const execPath = process.env.PLAYWRIGHT_CHROMIUM || undefined;
+  return chromium.launch({
+    headless: !HEADFUL(),
+    ...(execPath ? { executablePath: execPath } : {}),
+    args: ['--no-sandbox'],
+  });
+}
 
 function processosDeExemplo() {
   const hoje = new Date().toISOString().slice(0, 10);
@@ -56,7 +85,7 @@ function processosDeExemplo() {
 }
 
 // Faz login e retorna a página/contexto autenticados.
-async function autenticar(browser, cfg) {
+export async function autenticar(browser, cfg) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
 
@@ -64,22 +93,21 @@ async function autenticar(browser, cfg) {
   await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
   // Campos padrão do SEI 4.x
-  await page.fill('#txtUsuario', cfg.usuario);
-  await page.fill('#pwdSenha', cfg.senha);
+  await page.fill(SEL.loginUsuario, cfg.usuario);
+  await page.fill(SEL.loginSenha, cfg.senha);
   if (cfg.orgao) {
-    // Seletor de órgão, quando presente
-    const temOrgao = await page.$('#selOrgao');
+    const temOrgao = await page.$(SEL.loginOrgao);
     if (temOrgao) {
-      await page.selectOption('#selOrgao', { label: cfg.orgao }).catch(() => {});
+      await page.selectOption(SEL.loginOrgao, { label: cfg.orgao }).catch(() => {});
     }
   }
   await Promise.all([
     page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}),
-    page.click('#sbmAcessar, #Acessar, button[type="submit"], input[type="submit"]'),
+    page.click(SEL.loginBotao),
   ]);
 
   // Se ainda houver o campo de senha, o login falhou.
-  if (await page.$('#pwdSenha')) {
+  if (await page.$(SEL.loginSenha)) {
     throw new Error('Falha no login do SEI — verifique usuário, senha e órgão.');
   }
   return { context, page, baseUrl };
@@ -130,9 +158,7 @@ export async function extrairProcessos(cfg) {
     return { modo: 'simulacao', processos: processosDeExemplo() };
   }
 
-  // Import dinâmico para não exigir o Chromium instalado no modo simulação
-  const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: !HEADFUL() });
+  const browser = await abrirNavegador();
   try {
     const { page, baseUrl } = await autenticar(browser, cfg);
     const processos = await extrairControleProcessos(page, baseUrl, cfg);
