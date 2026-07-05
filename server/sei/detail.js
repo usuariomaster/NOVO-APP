@@ -275,7 +275,9 @@ async function coletarMetadados(page) {
         }
         inter = inter || null;
         // Assunto/especificação: prefere a descrição livre; senão o assunto classificado.
-        const espec = g('txtDescricao') || aposPipe(g('hdnAssuntos')) || null;
+        let descLivre = g('txtDescricao');
+        if (/^\s*ref\.?\s+/i.test(descLivre)) descLivre = ''; // "REF. NOME" e referencia ao interessado, nao assunto
+        const espec = aposPipe(g('hdnAssuntos')) || descLivre || null;
         // amostra: rótulos + campos visíveis
         const campos = Array.from(document.querySelectorAll('input,select,textarea'))
           .map((e) => `${e.id || e.name || ''}=${(e.value || (e.tagName === 'SELECT' && e.options[e.selectedIndex]?.textContent) || '').toString().trim().slice(0, 40)}`)
