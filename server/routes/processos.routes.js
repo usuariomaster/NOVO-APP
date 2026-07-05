@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
-import db, { registrarHistorico, ehSimulacao, getConfig, setConfig, vincularServidor } from '../db.js';
+import db, { registrarHistorico, ehSimulacao, getConfig, setConfig, vincularServidor, limparNomeInteressado } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
@@ -379,6 +379,8 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
 
 // Persiste o resultado do detalhamento de UM processo (usado no avulso e no lote).
 function aplicarDetalhe(proc, r, usuario) {
+  // O interessado da autuação é o AUTORITATIVO: sobrescreve palpite da lista.
+  const nome = limparNomeInteressado(r.interessado);
   db.prepare(
     `UPDATE processos SET
        tipo = COALESCE(?, tipo),
@@ -388,8 +390,8 @@ function aplicarDetalhe(proc, r, usuario) {
        conteudo_em = datetime('now'),
        atualizado_em = datetime('now')
      WHERE id = ?`
-  ).run(r.tipo || null, r.interessado || null, r.especificacao || null, r.pdfProcesso || null, proc.id);
-  if (r.interessado) vincularServidor(proc.id, r.interessado, null);
+  ).run(r.tipo || null, nome, r.especificacao || null, r.pdfProcesso || null, proc.id);
+  if (nome) vincularServidor(proc.id, nome, null);
   if (Array.isArray(r.documentos) && r.documentos.length) {
     db.prepare('DELETE FROM documentos WHERE processo_id = ?').run(proc.id);
     const ins = db.prepare(
@@ -414,12 +416,16 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
   const cfgRow = db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
   if (!cfgRow && !mock) return res.status(400).json({ erro: 'Cadastre a configuração do SEI primeiro.' });
 
-  // Só os que ainda não têm conteúdo (interessado vazio) e não são físicos.
+  // Alvos: os sem conteúdo, sem servidor vinculado, OU com nome "sujo"
+  // (assunto que não é pessoa: REF./ASSENTAMENTO/com número/muito longo).
   const soFaltantes = req.body?.apenasFaltantes !== false;
+  const filtroFalt = `AND (
+      interessado IS NULL OR interessado = '' OR conteudo_em IS NULL OR servidor_id IS NULL
+      OR interessado LIKE '%REF.%' OR interessado LIKE '%ASSENTAMENTO%'
+      OR interessado LIKE '%PRONTU%' OR interessado GLOB '*[0-9]*' OR length(interessado) > 45
+    )`;
   const alvos = db.prepare(
-    `SELECT * FROM processos
-     WHERE fisico = 0 ${soFaltantes ? "AND (interessado IS NULL OR interessado = '' OR conteudo_em IS NULL)" : ''}
-     ORDER BY id`
+    `SELECT * FROM processos WHERE fisico = 0 ${soFaltantes ? filtroFalt : ''} ORDER BY id`
   ).all();
   if (!alvos.length) return res.json({ ok: true, total: 0, mensagem: 'Nada a buscar — todos já têm conteúdo.' });
 
@@ -457,6 +463,16 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
     } catch (e) {
       jobLote.erroFatal = e.message;
     } finally {
+      // Limpeza: remove servidores "lixo" — sem processo e sem nenhum dado
+      // preenchido (foram criados por engano a partir de assunto de processo).
+      try {
+        const del = db.prepare(
+          `DELETE FROM servidores WHERE id NOT IN (SELECT servidor_id FROM processos WHERE servidor_id IS NOT NULL)
+             AND cpf IS NULL AND matricula IS NULL AND ficha_atualizada_em IS NULL
+             AND ppp_atividades IS NULL AND (observacoes IS NULL OR observacoes = '')`
+        ).run();
+        jobLote.servidoresRemovidos = del.changes;
+      } catch { /* ignora */ }
       jobLote.rodando = false;
       jobLote.terminado = new Date().toISOString();
     }

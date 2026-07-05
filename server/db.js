@@ -312,9 +312,34 @@ CREATE TABLE IF NOT EXISTS padroes (
   criado_em   TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 
+// Limpa o "interessado" para extrair o NOME DA PESSOA. No SEI muitos processos
+// vêm como "ASSENTAMENTO ... REF. NOME" ou "REF. NOME" — a pessoa é o que vem
+// depois de REF./REFERENTE. Descarta strings que são claramente título de
+// documento (sem pessoa). Retorna o nome limpo ou null.
+export function limparNomeInteressado(bruto) {
+  let s = String(bruto || '').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  // pega o trecho após o último "REF." / "REFERENTE A" / "REFERENTE:"
+  const m = s.match(/\bREF(?:ER[EÊ]NTE)?\.?\s*(?:A|AO|AOS|[AÀ]S)?\s*[:\-]?\s*(.+)$/i);
+  if (m && m[1]) s = m[1].trim();
+  // remove prefixos de tipo de documento que às vezes sobram
+  s = s.replace(/^(ASSENTAMENTO|PRONTU[AÁ]RIO|FUNCIONAL|PROCESSO|REQUERIMENTO|DESPACHO|OF[IÍ]CIO|MEMORANDO|LAUDO|ATESTADO|CERTID[AÃ]O|EM|DE|DO|DA)\b[\s:.-]*/gi, '').trim();
+  // separadores comuns (nome vem antes de vírgula/traço com matrícula, etc.)
+  s = s.split(/[\n;|,]/)[0].trim();
+  s = s.split(/\s[-–—]\s/)[0].trim();       // "NOME - MATRÍCULA 123" -> "NOME"
+  s = s.replace(/\s+(MATR[IÍ]CULA|MAT|CPF|SIAPE)\b.*$/i, '').trim();
+  if (s.length < 4 || s.length > 60) return null;
+  // precisa parecer nome: só letras/espaços/pontos/hífen, com pelo menos 2 palavras
+  if (!/^[A-Za-zÀ-ú.'\- ]+$/.test(s)) return null;
+  if (s.split(/\s+/).filter((w) => w.length > 1).length < 2) return null;
+  // ainda com cara de título de documento? descarta
+  if (/ASSENTAMENTO|PRONTU[AÁ]RIO|REQUERIMENTO|DESPACHO|OF[IÍ]CIO|MEMORANDO|CERTID[AÃ]O|PROCESSO\b/i.test(s)) return null;
+  return s;
+}
+
 // Encontra ou cria o servidor (pessoa periciada) pelo nome/CPF e vincula ao processo.
 export function vincularServidor(processoId, nome, cpf) {
-  const nomeLimpo = String(nome || '').replace(/^REF\.?\s*/i, '').trim();
+  const nomeLimpo = limparNomeInteressado(nome);
   if (!nomeLimpo) return null;
   let serv = cpf ? db.prepare('SELECT id FROM servidores WHERE cpf = ?').get(cpf) : null;
   if (!serv) serv = db.prepare('SELECT id FROM servidores WHERE upper(nome) = upper(?)').get(nomeLimpo);
@@ -326,6 +351,32 @@ export function vincularServidor(processoId, nome, cpf) {
   }
   if (processoId) db.prepare('UPDATE processos SET servidor_id = ? WHERE id = ?').run(serv.id, processoId);
   return serv.id;
+}
+
+// Correção única dos dados já existentes: limpa nomes de interessado antigos
+// (assunto que virou "servidor" por engano) e reconstrói a lista de servidores
+// a partir dos nomes limpos. Preserva servidores com dados manuais/OCR.
+if (getConfig('interessados_limpos_v1') !== '1') {
+  try {
+    // 1) limpa o interessado dos processos
+    const procs = db.prepare("SELECT id, interessado FROM processos WHERE interessado IS NOT NULL AND interessado <> ''").all();
+    const updP = db.prepare('UPDATE processos SET interessado = ? WHERE id = ?');
+    for (const p of procs) updP.run(limparNomeInteressado(p.interessado), p.id);
+    // 2) remove servidores auto-criados (sem dados manuais, sem afastamentos/docs)
+    db.prepare(
+      `DELETE FROM servidores WHERE cpf IS NULL AND matricula IS NULL
+         AND ficha_atualizada_em IS NULL AND ppp_atividades IS NULL
+         AND (observacoes IS NULL OR observacoes = '')
+         AND id NOT IN (SELECT servidor_id FROM afastamentos WHERE servidor_id IS NOT NULL)
+         AND id NOT IN (SELECT servidor_id FROM prontuario_docs WHERE servidor_id IS NOT NULL)`
+    ).run();
+    // 3) desvincula processos cujo servidor foi removido
+    db.prepare('UPDATE processos SET servidor_id = NULL WHERE servidor_id IS NOT NULL AND servidor_id NOT IN (SELECT id FROM servidores)').run();
+    // 4) reconstrói servidores a partir do interessado já limpo
+    const rebuild = db.prepare("SELECT id, interessado FROM processos WHERE interessado IS NOT NULL AND interessado <> '' AND servidor_id IS NULL").all();
+    for (const p of rebuild) { try { vincularServidor(p.id, p.interessado, null); } catch { /* ignora */ } }
+    setConfig('interessados_limpos_v1', '1');
+  } catch { /* ignora */ }
 }
 
 export function registrarHistorico({ processoId, usuario, acao, detalhe }) {

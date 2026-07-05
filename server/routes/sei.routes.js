@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
-import db, { registrarHistorico, ehSimulacao, getConfig, setConfig, vincularServidor } from '../db.js';
+import db, { registrarHistorico, ehSimulacao, getConfig, setConfig, vincularServidor, limparNomeInteressado } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { criptografar, descriptografar } from '../sei/crypto.js';
 import { extrairProcessos } from '../sei/scraper.js';
@@ -130,7 +130,9 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
   let comNome = 0;
   const tx = db.transaction((lista) => {
     for (const p of lista) {
-      if (p.interessado) comNome++;
+      // Limpa o nome já na entrada: descarta "assunto" que não é pessoa.
+      const nomeLimpo = limparNomeInteressado(p.interessado);
+      if (nomeLimpo) comNome++;
       if (existe.get(p.numero_sei)) {
         ignorados++;
         continue;
@@ -138,15 +140,15 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
       const info = inserirProc.run({
         numero_sei: p.numero_sei,
         tipo: p.tipo ?? null,
-        interessado: p.interessado ?? null,
+        interessado: nomeLimpo,
         especificacao: p.especificacao ?? null,
         data_autuacao: p.data_autuacao ?? null,
         unidade_origem: p.unidade_origem ?? null,
         link_sei: p.link_sei ?? null,
         operador_id: req.usuario.id,
       });
-      // Se o nome já veio na lista do SEI, cria/vincula o servidor de imediato.
-      if (p.interessado) { try { vincularServidor(info.lastInsertRowid, p.interessado, null); } catch { /* ignora */ } }
+      // Se o nome já veio (e é pessoa), cria/vincula o servidor de imediato.
+      if (nomeLimpo) { try { vincularServidor(info.lastInsertRowid, nomeLimpo, null); } catch { /* ignora */ } }
       for (const d of p.documentos || []) {
         inserirDoc.run(info.lastInsertRowid, d.numero ?? null, d.tipo ?? null, d.data ?? null, d.link_sei ?? null);
       }
