@@ -213,6 +213,55 @@ garantirColuna('sei_config', 'gerar_pdf', 'gerar_pdf INTEGER NOT NULL DEFAULT 0'
 // Data de entrada do processo na perícia (para prazos) e tipo da perícia
 garantirColuna('processos', 'data_entrada', 'data_entrada TEXT');
 
+// Servidor periciado (a pessoa dos processos) — vínculo com o processo
+garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');
+
+// Cadastro de servidores periciados + ficha funcional (base para PPP)
+db.exec(`
+CREATE TABLE IF NOT EXISTS servidores (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome           TEXT NOT NULL,
+  cpf            TEXT,
+  matricula      TEXT,
+  cargo          TEXT,
+  funcao         TEXT,
+  lotacao        TEXT,
+  secretaria     TEXT,
+  setor          TEXT,
+  data_nascimento TEXT,
+  sexo           TEXT,
+  data_admissao  TEXT,
+  vinculo        TEXT,
+  atividades     TEXT,
+  agentes_nocivos TEXT,
+  observacoes    TEXT,
+  criado_em      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS afastamentos (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  servidor_id  INTEGER NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+  processo_id  INTEGER REFERENCES processos(id) ON DELETE SET NULL,
+  tipo         TEXT,
+  cid          TEXT,
+  cid2         TEXT,
+  data_inicio  TEXT,
+  data_fim     TEXT,
+  dias         INTEGER,
+  descricao    TEXT,
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS prontuario_docs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  servidor_id  INTEGER NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+  tipo         TEXT,
+  arquivo      TEXT NOT NULL,
+  nome_orig    TEXT,
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_afast_serv ON afastamentos(servidor_id);
+CREATE INDEX IF NOT EXISTS idx_proc_serv ON processos(servidor_id);
+`);
+
 // Padrões pessoais de despacho do perito
 db.exec(`
 CREATE TABLE IF NOT EXISTS padroes (
@@ -222,6 +271,22 @@ CREATE TABLE IF NOT EXISTS padroes (
   texto       TEXT NOT NULL,
   criado_em   TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+
+// Encontra ou cria o servidor (pessoa periciada) pelo nome/CPF e vincula ao processo.
+export function vincularServidor(processoId, nome, cpf) {
+  const nomeLimpo = String(nome || '').replace(/^REF\.?\s*/i, '').trim();
+  if (!nomeLimpo) return null;
+  let serv = cpf ? db.prepare('SELECT id FROM servidores WHERE cpf = ?').get(cpf) : null;
+  if (!serv) serv = db.prepare('SELECT id FROM servidores WHERE upper(nome) = upper(?)').get(nomeLimpo);
+  if (!serv) {
+    const info = db.prepare('INSERT INTO servidores (nome, cpf) VALUES (?, ?)').run(nomeLimpo, cpf || null);
+    serv = { id: info.lastInsertRowid };
+  } else if (cpf) {
+    db.prepare('UPDATE servidores SET cpf = COALESCE(cpf, ?) WHERE id = ?').run(cpf, serv.id);
+  }
+  if (processoId) db.prepare('UPDATE processos SET servidor_id = ? WHERE id = ?').run(serv.id, processoId);
+  return serv.id;
+}
 
 export function registrarHistorico({ processoId, usuario, acao, detalhe }) {
   db.prepare(

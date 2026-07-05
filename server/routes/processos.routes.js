@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
-import db, { registrarHistorico, ehSimulacao, getConfig, setConfig } from '../db.js';
+import db, { registrarHistorico, ehSimulacao, getConfig, setConfig, vincularServidor } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
@@ -133,6 +133,7 @@ router.put('/:id', exigirPapel('operador', 'admin'), (req, res) => {
        atualizado_em = datetime('now')
      WHERE id = ?`
   ).run(prioridade ?? null, prazo ?? null, tipo ?? null, interessado ?? null, especificacao ?? null, req.params.id);
+  if (interessado) vincularServidor(proc.id, interessado, null);
   registrarHistorico({ processoId: proc.id, usuario: req.usuario, acao: 'editado', detalhe: 'Dados/prioridade atualizados' });
   res.json({ ok: true });
 });
@@ -161,6 +162,7 @@ router.post('/fisico', exigirPapel('operador', 'admin'), (req, res) => {
     numero, tipo || null, interessado || null, especificacao || null, secretaria_destino || null,
     prioridade || 'normal', prazo || null, req.usuario.id
   );
+  if (interessado) vincularServidor(info.lastInsertRowid, interessado, null);
   registrarHistorico({ processoId: info.lastInsertRowid, usuario: req.usuario, acao: 'incluido_fisico', detalhe: 'Processo físico incluído manualmente' });
   res.status(201).json({ id: info.lastInsertRowid, numero_sei: numero });
 });
@@ -296,6 +298,7 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
        atualizado_em = datetime('now')
      WHERE id = ?`
   ).run(r.tipo || null, r.interessado || null, r.especificacao || null, r.pdfProcesso || null, proc.id);
+  if (r.interessado) vincularServidor(proc.id, r.interessado, null);
 
   // Substitui a lista de documentos (com conteúdo/arquivo).
   let comPdf = 0;

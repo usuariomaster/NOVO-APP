@@ -89,6 +89,7 @@ const rotas = {
   '': renderPainel,
   '#painel': renderPainel,
   '#processos': renderProcessos,
+  '#servidores': renderServidores,
   '#mensageiro': renderMensageiro,
   '#usuarios': renderUsuarios,
   '#sei': renderConfigSei,
@@ -98,6 +99,8 @@ async function navegar() {
   const hash = location.hash;
   const fn = hash.startsWith('#processo/')
     ? () => renderProcessoDetalhe(hash.split('/')[1])
+    : hash.startsWith('#servidor/')
+    ? () => renderServidorDetalhe(hash.split('/')[1])
     : (rotas[hash] || renderPainel);
   try {
     await fn();
@@ -127,6 +130,7 @@ function shell(conteudo) {
   const nav = [
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#processos">📁 ${isPerito ? 'Meus processos' : 'Processos'}</a>`,
+    `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
     isOper ? `<a href="#mensageiro">🚚 Mensageiro</a>` : '',
     isAdmin ? `<a href="#usuarios">👥 Usuários</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
@@ -465,6 +469,145 @@ async function extrairDoSei() {
     btn.disabled = false;
     btn.textContent = '⬇️ Extrair do SEI';
   }
+}
+
+// ============================================================
+// Servidores (pessoas periciadas) — cadastro + dashboard
+// ============================================================
+const CAMPOS_SERV = [
+  ['nome', 'Nome'], ['cpf', 'CPF'], ['matricula', 'Matrícula'], ['cargo', 'Cargo'],
+  ['funcao', 'Função'], ['lotacao', 'Lotação'], ['secretaria', 'Secretaria'], ['setor', 'Setor'],
+  ['data_nascimento', 'Nascimento'], ['sexo', 'Sexo'], ['data_admissao', 'Admissão'], ['vinculo', 'Vínculo'],
+  ['atividades', 'Atividades (PPP)'], ['agentes_nocivos', 'Agentes nocivos (PPP)'], ['observacoes', 'Observações'],
+];
+
+async function renderServidores() {
+  shell('<div class="empty">Carregando…</div>');
+  const lista = await api.get('/api/servidores');
+  setMain(`
+    <div class="page-head">
+      <div><h2>Servidores <span class="badge pr-normal" style="font-size:14px">${lista.length}</span></h2>
+      <div class="desc">Pessoas periciadas — ficha funcional, afastamentos (CID), prontuário e base para PPP.</div></div>
+      <button class="btn" id="btn-novo-serv">＋ Novo servidor</button>
+    </div>
+    <div class="toolbar"><input type="search" id="busca-serv" placeholder="Buscar nome, CPF, matrícula…"></div>
+    <div class="card"><div id="lista-serv"></div></div>
+  `);
+  const desenha = (arr) => {
+    document.getElementById('lista-serv').innerHTML = arr.length ? `<table>
+      <thead><tr><th>Nome</th><th>Matrícula</th><th>Cargo</th><th>Processos</th><th>Afastamentos</th></tr></thead>
+      <tbody>${arr.map((s) => `<tr data-id="${s.id}" style="cursor:pointer">
+        <td><b>${esc(s.nome)}</b><br><span class="muted">${esc(s.cpf || '')}</span></td>
+        <td>${esc(s.matricula || '—')}</td><td>${esc(s.cargo || '—')}</td>
+        <td>${s.n_processos}</td><td>${s.n_afastamentos}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Nenhum servidor. Eles são criados automaticamente ao buscar o conteúdo dos processos, ou cadastre manualmente.</div>';
+    document.querySelectorAll('#lista-serv tr[data-id]').forEach((tr) => { tr.onclick = () => (location.hash = `#servidor/${tr.dataset.id}`); });
+  };
+  desenha(lista);
+  let deb; document.getElementById('busca-serv').oninput = (e) => {
+    clearTimeout(deb); deb = setTimeout(async () => desenha(await api.get('/api/servidores?q=' + encodeURIComponent(e.target.value))), 300);
+  };
+  document.getElementById('btn-novo-serv').onclick = async () => {
+    const r = await modal({ titulo: 'Novo servidor', okLabel: 'Criar',
+      corpo: `<div class="field"><label>Nome</label><input name="nome"></div>
+        <div class="row"><div class="field"><label>CPF</label><input name="cpf"></div>
+        <div class="field"><label>Matrícula</label><input name="matricula"></div></div>` });
+    if (!r || !r.nome) return;
+    try { const c = await api.post('/api/servidores', r); toast('Servidor criado'); location.hash = `#servidor/${c.id}`; }
+    catch (e) { toast(e.message, true); }
+  };
+}
+
+async function renderServidorDetalhe(id) {
+  shell('<div class="empty">Carregando…</div>');
+  let s;
+  try { s = await api.get('/api/servidores/' + id); }
+  catch (e) { setMain(`<div class="card"><div class="empty">${esc(e.message)}</div></div>`); return; }
+
+  const ficha = CAMPOS_SERV.map(([k, lbl]) =>
+    `<div class="field" style="margin-bottom:10px"><label>${lbl}</label>${
+      k === 'atividades' || k === 'agentes_nocivos' || k === 'observacoes'
+        ? `<textarea data-campo="${k}" style="min-height:60px">${esc(s[k] || '')}</textarea>`
+        : `<input data-campo="${k}" value="${esc(s[k] || '')}">`}</div>`).join('');
+
+  const afast = s.afastamentos.length ? `<table>
+    <thead><tr><th>Início</th><th>Fim</th><th>Dias</th><th>CID</th><th>Tipo</th><th></th></tr></thead>
+    <tbody>${s.afastamentos.map((a) => `<tr>
+      <td>${esc(a.data_inicio || '—')}</td><td>${esc(a.data_fim || '—')}</td><td>${a.dias ?? '—'}</td>
+      <td><b>${esc(a.cid || '—')}</b>${a.cid2 ? '/' + esc(a.cid2) : ''}</td><td>${esc(a.tipo || '—')}</td>
+      <td><button class="btn danger sm" data-delaf="${a.id}">🗑</button></td></tr>`).join('')}</tbody></table>`
+    : '<span class="muted">Nenhum afastamento registrado.</span>';
+
+  const docs = s.documentos.length ? s.documentos.map((d) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span style="flex:1"><b>${esc(d.tipo)}</b> <span class="muted">${esc(d.nome_orig || '')}</span></span>
+      <a class="btn secondary sm" href="/api/servidores/${id}/documentos/${d.id}" target="_blank">baixar</a>
+      <button class="btn danger sm" data-deldoc="${d.id}">🗑</button></div>`).join('')
+    : '<span class="muted">Nenhum documento no prontuário.</span>';
+
+  const procs = s.processos.length ? `<table><thead><tr><th>Processo</th><th>Tipo</th><th>Status</th></tr></thead>
+    <tbody>${s.processos.map((p) => `<tr data-proc="${p.id}" style="cursor:pointer">
+      <td class="num-proc">${esc(p.numero_sei)} ${p.fisico ? '<span class="badge pr-alta" style="font-size:11px">físico</span>' : ''}</td>
+      <td>${esc(p.tipo || '—')}<br><span class="muted">${esc(p.especificacao || '')}</span></td><td>${badge(p.status)}</td></tr>`).join('')}</tbody></table>`
+    : '<span class="muted">Nenhum processo vinculado.</span>';
+
+  setMain(`
+    <div class="page-head"><div>
+      <a href="#servidores" class="muted">← servidores</a>
+      <h2 style="margin-top:4px">${esc(s.nome)}</h2>
+      <div class="desc">${esc(s.cargo || '')} ${s.matricula ? '• Matrícula ' + esc(s.matricula) : ''} • ${s.processos.length} processo(s) • ${s.total_dias_afastado} dia(s) afastado</div>
+    </div>
+    <a class="btn" href="/api/servidores/${id}/ppp" target="_blank" rel="noopener">🖨 Ficha / PPP</a></div>
+    <div class="detail-grid">
+      <div>
+        <div class="card"><div class="card-h">Ficha funcional <button class="btn sm" id="s-salvar">Salvar</button></div>
+          <div class="card-b">${ficha}</div></div>
+        <div class="card"><div class="card-h">Afastamentos (CID) <button class="btn sm" id="s-add-af">＋ Afastamento</button></div>
+          <div class="card-b">${afast}</div></div>
+      </div>
+      <div>
+        <div class="card"><div class="card-h">Processos na perícia</div><div class="card-b">${procs}</div></div>
+        <div class="card"><div class="card-h">Prontuário médico</div><div class="card-b">
+          <div id="s-docs">${docs}</div>
+          <div class="row" style="margin-top:10px;align-items:flex-end">
+            <div class="field" style="margin:0"><label>Tipo</label><input id="s-doc-tipo" placeholder="ex.: Laudo, Atestado"></div>
+            <div class="field" style="margin:0"><label>Arquivo</label><input id="s-doc-arq" type="file"></div>
+            <button class="btn sm" id="s-doc-up">Anexar</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  `);
+
+  document.querySelectorAll('#main-content tr[data-proc]').forEach((tr) => { tr.onclick = () => (location.hash = `#processo/${tr.dataset.proc}`); });
+  document.getElementById('s-salvar').onclick = async () => {
+    const corpo = {};
+    document.querySelectorAll('[data-campo]').forEach((el) => (corpo[el.dataset.campo] = el.value));
+    try { await api.put('/api/servidores/' + id, corpo); toast('Ficha salva'); }
+    catch (e) { toast(e.message, true); }
+  };
+  document.getElementById('s-add-af').onclick = async () => {
+    const r = await modal({ titulo: 'Registrar afastamento', okLabel: 'Salvar', corpo: `
+      <div class="row"><div class="field"><label>Início</label><input name="data_inicio" type="date"></div>
+      <div class="field"><label>Fim</label><input name="data_fim" type="date"></div></div>
+      <div class="row"><div class="field"><label>CID</label><input name="cid" placeholder="ex.: M54.5"></div>
+      <div class="field"><label>CID 2 (opcional)</label><input name="cid2"></div></div>
+      <div class="field"><label>Tipo</label><input name="tipo" placeholder="ex.: Licença médica"></div>
+      <div class="field"><label>Descrição</label><input name="descricao"></div>` });
+    if (!r) return;
+    try { await api.post(`/api/servidores/${id}/afastamentos`, r); toast('Afastamento registrado'); renderServidorDetalhe(id); }
+    catch (e) { toast(e.message, true); }
+  };
+  document.querySelectorAll('[data-delaf]').forEach((b) => { b.onclick = async () => { await api.del(`/api/servidores/${id}/afastamentos/${b.dataset.delaf}`); renderServidorDetalhe(id); }; });
+  document.querySelectorAll('[data-deldoc]').forEach((b) => { b.onclick = async () => { await api.del(`/api/servidores/${id}/documentos/${b.dataset.deldoc}`); renderServidorDetalhe(id); }; });
+  document.getElementById('s-doc-up').onclick = async () => {
+    const tipo = document.getElementById('s-doc-tipo').value.trim();
+    const arq = document.getElementById('s-doc-arq').files[0];
+    if (!tipo) return toast('Informe o tipo', true);
+    if (!arq) return toast('Escolha um arquivo', true);
+    const dados_base64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(arq); });
+    try { await api.post(`/api/servidores/${id}/documentos`, { tipo, nome_orig: arq.name, dados_base64 }); toast('Documento anexado'); renderServidorDetalhe(id); }
+    catch (e) { toast(e.message, true); }
+  };
 }
 
 // ============================================================

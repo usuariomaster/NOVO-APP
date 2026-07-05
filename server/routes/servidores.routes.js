@@ -1,0 +1,167 @@
+// Cadastro de servidores periciados: ficha funcional, processos, afastamentos
+// (com CID), prontuário (documentos) e base para o PPP.
+import { Router } from 'express';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import db from '../db.js';
+import { exigirLogin, exigirPapel } from '../auth.js';
+
+const router = Router();
+router.use(exigirLogin);
+router.use(exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_admin'));
+
+const DIR_PRONT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'prontuarios');
+
+const CAMPOS = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao', 'secretaria', 'setor',
+  'data_nascimento', 'sexo', 'data_admissao', 'vinculo', 'atividades', 'agentes_nocivos', 'observacoes'];
+
+// Lista de servidores (com contagem de processos e afastamentos).
+router.get('/', (req, res) => {
+  const q = req.query.q ? `%${req.query.q}%` : null;
+  const linhas = db.prepare(
+    `SELECT s.*,
+       (SELECT COUNT(*) FROM processos p WHERE p.servidor_id = s.id) AS n_processos,
+       (SELECT COUNT(*) FROM afastamentos a WHERE a.servidor_id = s.id) AS n_afastamentos
+     FROM servidores s
+     ${q ? 'WHERE s.nome LIKE ? OR s.cpf LIKE ? OR s.matricula LIKE ?' : ''}
+     ORDER BY s.nome`
+  ).all(...(q ? [q, q, q] : []));
+  res.json(linhas);
+});
+
+// Ficha completa do servidor (dashboard).
+router.get('/:id', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
+  s.processos = db.prepare(
+    `SELECT id, numero_sei, tipo, especificacao, status, fisico, data_entrada FROM processos WHERE servidor_id = ? ORDER BY id DESC`
+  ).all(s.id);
+  s.afastamentos = db.prepare('SELECT * FROM afastamentos WHERE servidor_id = ? ORDER BY data_inicio DESC, id DESC').all(s.id);
+  s.documentos = db.prepare('SELECT id, tipo, nome_orig, criado_em FROM prontuario_docs WHERE servidor_id = ? ORDER BY id DESC').all(s.id);
+  // total de dias afastado
+  s.total_dias_afastado = s.afastamentos.reduce((t, a) => t + (a.dias || 0), 0);
+  res.json(s);
+});
+
+router.post('/', (req, res) => {
+  const b = req.body || {};
+  if (!b.nome) return res.status(400).json({ erro: 'Informe o nome' });
+  const cols = CAMPOS.filter((c) => b[c] !== undefined);
+  const info = db.prepare(
+    `INSERT INTO servidores (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`
+  ).run(...cols.map((c) => b[c] || null));
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+router.put('/:id', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
+  const b = req.body || {};
+  const cols = CAMPOS.filter((c) => b[c] !== undefined);
+  if (cols.length) {
+    db.prepare(`UPDATE servidores SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`)
+      .run(...cols.map((c) => b[c] || null), s.id);
+  }
+  res.json({ ok: true });
+});
+
+router.delete('/:id', exigirPapel('operador', 'admin', 'admin_master'), (req, res) => {
+  db.prepare('DELETE FROM servidores WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- Afastamentos (com CID) ----
+router.post('/:id/afastamentos', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
+  const { tipo, cid, cid2, data_inicio, data_fim, dias, descricao, processo_id } = req.body || {};
+  // calcula dias se não informado
+  let d = dias ? parseInt(dias, 10) : null;
+  if (!d && data_inicio && data_fim) {
+    const di = new Date(data_inicio), df = new Date(data_fim);
+    if (!isNaN(di) && !isNaN(df)) d = Math.max(0, Math.round((df - di) / 86400000) + 1);
+  }
+  const info = db.prepare(
+    `INSERT INTO afastamentos (servidor_id, processo_id, tipo, cid, cid2, data_inicio, data_fim, dias, descricao)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(s.id, processo_id || null, tipo || null, cid || null, cid2 || null, data_inicio || null, data_fim || null, d, descricao || null);
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+router.delete('/:id/afastamentos/:aid', (req, res) => {
+  db.prepare('DELETE FROM afastamentos WHERE id = ? AND servidor_id = ?').run(req.params.aid, req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- Prontuário (documentos médicos) ----
+router.post('/:id/documentos', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
+  const { tipo, nome_orig, dados_base64 } = req.body || {};
+  if (!tipo || !dados_base64) return res.status(400).json({ erro: 'Informe o tipo e o arquivo' });
+  const dir = join(DIR_PRONT, String(s.id));
+  mkdirSync(dir, { recursive: true });
+  const base = String(dados_base64).includes(',') ? String(dados_base64).split(',')[1] : String(dados_base64);
+  const buf = Buffer.from(base, 'base64');
+  if (buf.length > 30 * 1024 * 1024) return res.status(413).json({ erro: 'Arquivo muito grande (máx. 30MB)' });
+  const ext = (nome_orig && nome_orig.includes('.')) ? nome_orig.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').slice(0, 5) : 'bin';
+  const arquivo = `pront-${Date.now()}.${ext}`;
+  writeFileSync(join(dir, arquivo), buf);
+  const info = db.prepare('INSERT INTO prontuario_docs (servidor_id, tipo, arquivo, nome_orig) VALUES (?, ?, ?, ?)')
+    .run(s.id, String(tipo).trim(), arquivo, nome_orig || null);
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+router.get('/:id/documentos/:docId', (req, res) => {
+  const doc = db.prepare('SELECT * FROM prontuario_docs WHERE id = ? AND servidor_id = ?').get(req.params.docId, req.params.id);
+  if (!doc) return res.status(404).json({ erro: 'Documento não encontrado' });
+  const nome = String(doc.arquivo).replace(/[^a-zA-Z0-9._-]/g, '');
+  const caminho = join(DIR_PRONT, String(req.params.id), nome);
+  if (!existsSync(caminho)) return res.status(404).json({ erro: 'Arquivo não encontrado' });
+  res.sendFile(caminho);
+});
+
+router.delete('/:id/documentos/:docId', (req, res) => {
+  db.prepare('DELETE FROM prontuario_docs WHERE id = ? AND servidor_id = ?').run(req.params.docId, req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- PPP / relatório (dados consolidados, imprimível) ----
+router.get('/:id/ppp', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).send('Servidor não encontrado');
+  const afast = db.prepare('SELECT * FROM afastamentos WHERE servidor_id = ? ORDER BY data_inicio').all(s.id);
+  const procs = db.prepare('SELECT numero_sei, tipo, especificacao, status FROM processos WHERE servidor_id = ?').all(s.id);
+  const esc = (x) => String(x ?? '—').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const linhaAf = afast.map((a) =>
+    `<tr><td>${esc(a.data_inicio)}</td><td>${esc(a.data_fim)}</td><td>${esc(a.dias)}</td><td>${esc(a.cid)}${a.cid2 ? '/' + esc(a.cid2) : ''}</td><td>${esc(a.tipo)}</td></tr>`
+  ).join('');
+  res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>Ficha / PPP — ${esc(s.nome)}</title>
+    <style>body{font-family:Arial,sans-serif;max-width:820px;margin:28px auto;padding:0 20px;color:#111}
+    h1{font-size:18px}h2{font-size:15px;border-bottom:1px solid #ccc;padding-bottom:4px;margin-top:24px}
+    table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border:1px solid #999;padding:5px 7px;font-size:12px;text-align:left}
+    th{background:#eee}dl{display:grid;grid-template-columns:180px 1fr;gap:4px 10px;font-size:13px}dt{color:#555}
+    @media print{.noprint{display:none}}</style></head><body>
+    <h1>FICHA FUNCIONAL / DADOS PARA PPP</h1>
+    <h2>Servidor</h2>
+    <dl>
+      <dt>Nome</dt><dd>${esc(s.nome)}</dd><dt>CPF</dt><dd>${esc(s.cpf)}</dd>
+      <dt>Matrícula</dt><dd>${esc(s.matricula)}</dd><dt>Cargo</dt><dd>${esc(s.cargo)}</dd>
+      <dt>Função</dt><dd>${esc(s.funcao)}</dd><dt>Lotação/Secretaria</dt><dd>${esc(s.lotacao)} ${esc(s.secretaria)}</dd>
+      <dt>Setor</dt><dd>${esc(s.setor)}</dd><dt>Admissão</dt><dd>${esc(s.data_admissao)}</dd>
+      <dt>Atividades</dt><dd>${esc(s.atividades)}</dd><dt>Agentes nocivos</dt><dd>${esc(s.agentes_nocivos)}</dd>
+    </dl>
+    <h2>Afastamentos</h2>
+    <table><thead><tr><th>Início</th><th>Fim</th><th>Dias</th><th>CID</th><th>Tipo</th></tr></thead>
+      <tbody>${linhaAf || '<tr><td colspan="5">Nenhum registrado</td></tr>'}</tbody></table>
+    <p><b>Total de dias afastado:</b> ${afast.reduce((t, a) => t + (a.dias || 0), 0)}</p>
+    <h2>Processos na perícia</h2>
+    <table><thead><tr><th>Processo</th><th>Tipo</th><th>Assunto</th><th>Status</th></tr></thead>
+      <tbody>${procs.map((p) => `<tr><td>${esc(p.numero_sei)}</td><td>${esc(p.tipo)}</td><td>${esc(p.especificacao)}</td><td>${esc(p.status)}</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>'}</tbody></table>
+    <div class="noprint" style="text-align:center;margin-top:24px"><button onclick="print()" style="padding:10px 20px">🖨 Imprimir</button></div>
+  </body></html>`);
+});
+
+export default router;
