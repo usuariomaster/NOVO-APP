@@ -46,6 +46,14 @@ function dataHora(s) {
   return isNaN(d) ? s : d.toLocaleString('pt-BR');
 }
 
+// Só a data (AAAA-MM-DD ou DD/MM/AAAA) -> DD/MM/AAAA.
+function dataBR(s) {
+  if (!s) return '—';
+  const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return String(s).slice(0, 10);
+}
+
 function toast(msg, erro = false) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -385,19 +393,19 @@ async function carregarLista(q, status, tipo) {
   cont.innerHTML = `
     <table>
       <thead><tr>
-        <th>Nº do processo</th><th>Assunto / Interessado</th><th>Unidade</th><th>Perito</th>
-        <th>Prioridade</th><th>Status</th><th>Atualizado</th>${podeExcluir ? '<th></th>' : ''}
+        <th>Nº do processo</th><th>Servidor</th><th>Assunto</th><th>Entrada</th><th>Enc. perícia</th>
+        <th>Perito</th><th>Status</th>${podeExcluir ? '<th></th>' : ''}
       </tr></thead>
       <tbody>
         ${procs.map((p) => `
           <tr data-id="${p.id}">
             <td class="num-proc">${esc(p.numero_sei)} ${p.fisico ? '<span class="badge pr-alta" style="font-size:11px">físico</span>' : ''}</td>
-            <td>${esc(p.especificacao || p.tipo || '—')}<br><span class="muted">${esc(p.interessado || '')}</span></td>
-            <td class="muted">${esc(p.unidade_origem || '—')}</td>
+            <td><b>${esc(p.interessado || '—')}</b></td>
+            <td>${esc(p.especificacao || p.tipo || '—')}</td>
+            <td class="muted">${dataBR(p.data_entrada)}</td>
+            <td class="muted">${dataBR(p.data_encaminhado || p.data_autuacao)}</td>
             <td>${esc(p.perito_nome || '—')}</td>
-            <td>${badgePr(p.prioridade)}</td>
             <td>${badge(p.status)}</td>
-            <td class="muted">${dataHora(p.atualizado_em)}</td>
             ${podeExcluir ? `<td><button class="btn danger sm" data-del="${p.id}" title="Excluir">🗑</button></td>` : ''}
           </tr>`).join('')}
       </tbody>
@@ -473,40 +481,14 @@ async function extrairDoSei() {
           ${amostra}${img}`,
       });
     }
-    // Resumo por unidade (de onde vieram os processos).
-    if (r.porUnidade && Object.keys(r.porUnidade).length) {
-      const linhas = Object.entries(r.porUnidade)
-        .map(([u, n]) => `<li><b>${esc(u)}</b>: ${n} processo(s)</li>`).join('');
-      // Se só veio 1 unidade, mostra o diagnóstico das unidades encontradas
-      // (para descobrir por que a 2ª unidade não foi lida) direto na tela.
-      let diag = '';
-      if (r.modo === 'sei' && Object.keys(r.porUnidade).length < 2 && r.unidadesDebug) {
-        const achadas = (r.unidadesEncontradas || []).length;
-        diag = `<details style="margin-top:14px"${achadas ? '' : ' open'}>
-          <summary style="cursor:pointer;color:var(--muted)">🔎 Diagnóstico das unidades (por que veio só uma?)</summary>
-          <p class="muted" style="margin:8px 0 4px">O robô encontrou <b>${achadas}</b> unidade(s) na tela "Alterar Unidade".
-          Se faltou a 2ª unidade, <b>copie o texto abaixo e me mande</b> para eu calibrar o botão de troca:</p>
-          <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.unidadesDebug)}</textarea>
-        </details>`;
-      }
-      // Diagnóstico do interessado: se poucos nomes vieram na lista, mostra os
-      // atributos das linhas para eu calibrar (opção B).
-      let diagInt = '';
-      if (r.modo === 'sei' && typeof r.comNome === 'number' && r.comNome < r.total && r.interessadosDebug) {
-        diagInt = `<details style="margin-top:12px">
-          <summary style="cursor:pointer;color:var(--muted)">🔎 Diagnóstico do nome (interessado) na lista</summary>
-          <p class="muted" style="margin:8px 0 4px">Vieram <b>${r.comNome}</b> de <b>${r.total}</b> com nome direto na lista.
-          Se ficou baixo, <b>copie o texto abaixo e me mande</b> — assim eu leio o nome já na extração:</p>
-          <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.interessadosDebug)}</textarea>
-        </details>`;
-      }
-      const resumoNome = typeof r.comNome === 'number' ? ` <span class="muted">(${r.comNome} com nome na lista)</span>` : '';
+    // Resumo da extração.
+    if (r.modo === 'sei') {
+      const resumoNome = typeof r.comNome === 'number' ? ` <span class="muted">(${r.comNome} já com nome e assunto)</span>` : '';
       await modal({
         titulo: 'Extração concluída',
         okLabel: 'Ver processos',
         corpo: `<p><b>${r.novos}</b> novo(s) e <b>${r.ignorados}</b> já existente(s).${resumoNome}</p>
-          <p class="muted" style="margin-top:6px">Dica: use <b>"🔎 Buscar conteúdo de todos"</b> para completar nome, assunto e documentos que não vieram na lista.</p>
-          <p class="muted">De onde vieram:</p><ul style="margin:0;padding-left:18px">${linhas}</ul>${diag}${diagInt}`,
+          <p class="muted" style="margin-top:6px">Use <b>"🔎 Buscar conteúdo de todos"</b> para completar documentos, ficha e afastamentos.</p>`,
       });
     } else {
       toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);

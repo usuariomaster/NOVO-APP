@@ -171,18 +171,21 @@ async function coletarDoFrame(frame) {
       const pareceNome = (s) => !!s && /[A-Za-zÀ-ú]{2,}/.test(s) && /\s/.test(s.trim())
         && s.trim().length >= 5 && s.trim().length <= 90 && !pareceProcesso(s.trim())
         && !/^\d/.test(s.trim());
-      // Extrai o interessado do tooltip do SEI: infraTooltipMostrar('titulo','texto...')
+      // Tooltip do SEI: infraTooltipMostrar('INTERESSADO','ASSUNTO')
+      //   1º argumento = interessado (ex.: "REF. ANDREIA MARIA URBANO DA ROCHA")
+      //   2º argumento = assunto     (ex.: "Reconsideração do Atestado")
       const doTooltip = (attr) => {
-        if (!attr) return '';
+        if (!attr) return { interessado: '', assunto: '' };
         const m = attr.match(/infraTooltipMostrar\s*\(([^)]*)\)/i);
-        if (!m) return '';
-        // pega o conteúdo entre aspas; procura "Interessado" ou o 1º nome plausível
+        if (!m) return { interessado: '', assunto: '' };
         const partes = [...m[1].matchAll(/'([^']*)'|"([^"]*)"/g)].map((x) => (x[1] ?? x[2] ?? '').trim());
-        const alvo = partes.find((p) => /interessad/i.test(p)) || '';
-        const dep = alvo.replace(/.*interessad[oa]s?\s*:?\s*/i, '').trim();
-        if (dep && pareceNome(dep)) return dep.split(/[;\n<]/)[0].trim();
-        const outro = partes.find((p) => pareceNome(p));
-        return outro || '';
+        // Se algum trecho vier rotulado "Interessado:", respeita; senão usa posição.
+        const rotulado = partes.find((p) => /interessad/i.test(p));
+        let interessado = '';
+        if (rotulado) interessado = rotulado.replace(/.*interessad[oa]s?\s*:?\s*/i, '').trim();
+        else if (partes[0]) interessado = partes[0];
+        const assunto = (partes[1] || '').trim();
+        return { interessado: interessado.split(/[;\n<]/)[0].trim(), assunto };
       };
       const out = [];
       for (const el of els) {
@@ -190,8 +193,9 @@ async function coletarDoFrame(frame) {
         const href = el.getAttribute('href') || '';
         const porHref = /procedimento_trabalhar|procedimento_visualizar/.test(href);
         if ((porHref || pareceProcesso(txt)) && pareceProcesso(txt)) {
-          let interessado = doTooltip(el.getAttribute('onmouseover') || el.getAttribute('onmousemove') || '')
-            || (pareceNome(el.getAttribute('title') || '') ? el.getAttribute('title').trim() : '');
+          const tip = doTooltip(el.getAttribute('onmouseover') || el.getAttribute('onmousemove') || '');
+          let interessado = tip.interessado || (pareceNome(el.getAttribute('title') || '') ? el.getAttribute('title').trim() : '');
+          const assunto = tip.assunto || null;
           // Fallback: procura na mesma linha (tr) uma célula que pareça nome.
           if (!interessado) {
             const tr = el.closest('tr');
@@ -202,7 +206,7 @@ async function coletarDoFrame(frame) {
               }
             }
           }
-          out.push({ numero_sei: txt, link_sei: el.href || '', porHref, interessado: interessado || null });
+          out.push({ numero_sei: txt, link_sei: el.href || '', porHref, interessado: interessado || null, assunto });
         }
       }
       return out;
@@ -271,9 +275,9 @@ async function extrairControleProcessos(page, unidadeNome) {
     processos.push({
       numero_sei: l.numero_sei,
       link_sei: l.link_sei,
-      tipo: null,
+      tipo: l.assunto || null,
       interessado: l.interessado || null,
-      especificacao: null,
+      especificacao: l.assunto || null,
       data_autuacao: null,
       unidade_origem: unidadeNome || null,
       documentos: [],
