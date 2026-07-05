@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { getConfig, setConfig } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { OBS_PADRAO_DEFAULT } from '../services/documentosPericia.js';
+import { lerTokenCofre } from './natasha.routes.js';
 
 const router = Router();
 router.use(exigirLogin);
@@ -14,8 +15,9 @@ router.get('/pericia', (req, res) => {
     pericia_whatsapp: getConfig('pericia_whatsapp') || '(21) 96649-5532',
     pericia_email: getConfig('pericia_email') || 'periciamedica@novaiguacu.rj.gov.br',
     pericia_horario: getConfig('pericia_horario') || '08h às 12h (peritos) · 08h às 17h (administrativo, com agendamento)',
-    // Só informa se o token da Natasha já está configurado (não devolve o valor).
-    natasha_token_definido: !!(process.env.NATASHA_TOKEN || getConfig('natasha_token')),
+    // Token da Natasha vem do COFRE automaticamente; só informa se está disponível.
+    natasha_token_definido: !!lerTokenCofre(),
+    natasha_do_cofre: !!lerTokenCofre() && !process.env.NATASHA_TOKEN && !getConfig('natasha_token'),
     natasha_travado_env: !!process.env.NATASHA_TOKEN,
   });
 });

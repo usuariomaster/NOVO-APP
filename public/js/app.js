@@ -1993,8 +1993,11 @@ async function renderConfigPericia() {
       <div class="field"><label>Texto-padrão do comprovante (uma observação por linha)</label>
         <textarea id="cp-obs" style="min-height:220px;font-size:13px">${esc(c.comprovante_obs || '')}</textarea></div>
       <div class="field"><label>🔗 Token da Natasha (WhatsApp) — porta de entrada</label>
-        <input id="cp-natasha" type="password" placeholder="${c.natasha_token_definido ? '•••••••• (definido — deixe em branco para manter)' : 'cole aqui o token compartilhado com a Natasha'}" ${c.natasha_travado_env ? 'disabled' : ''}>
-        <span class="muted" style="font-size:12px">A Natasha usa este token no header <code>X-Natasha-Token</code> para entregar os documentos do WhatsApp na Caixa de entrada. ${c.natasha_travado_env ? '(definido por variável de ambiente)' : ''}</span></div>
+        <div style="margin:2px 0 6px">${c.natasha_do_cofre
+          ? '<span class="canal wa">✅ lido do cofre automaticamente</span>'
+          : c.natasha_token_definido ? '<span class="canal sei">definido</span>' : '<span class="canal gh">não encontrado no cofre</span>'}</div>
+        <input id="cp-natasha" type="password" placeholder="${c.natasha_do_cofre ? 'já vem do cofre — só preencha para sobrepor' : (c.natasha_token_definido ? '•••••••• (definido — deixe em branco para manter)' : 'opcional: cole o token; ou deixe o sistema ler do cofre')}" ${c.natasha_travado_env ? 'disabled' : ''}>
+        <span class="muted" style="font-size:12px">O sistema lê o token do <b>cofre</b> (<code>/etc/natasha/config.json</code> → <code>gro.token</code> ou o <code>integra_gro_natasha.key</code>). A Natasha usa esse token no header <code>X-Natasha-Token</code> para entregar os documentos do WhatsApp na Caixa de entrada.</span></div>
       <button class="btn" id="cp-salvar">Salvar</button>
       <span class="muted" style="margin-left:10px;font-size:13px">Aparece no rodapé do comprovante ao servidor.</span>
     </div></div>

@@ -9,13 +9,40 @@
 //   "gro": { "url": "http://SEU_HOST/api/natasha", "token": "<mesmo token>" }
 // ============================================================
 import { Router } from 'express';
+import fs from 'node:fs';
 import db, { getConfig } from '../db.js';
 
 const router = Router();
 
-// Token compartilhado: env NATASHA_TOKEN ou config 'natasha_token' (admin).
+// Lê o token da porta WhatsApp do COFRE DE TOKENS, na ordem:
+//   1) variável de ambiente NATASHA_TOKEN
+//   2) config do app (natasha_token)
+//   3) /etc/natasha/config.json  -> gro.token | gro_token  (mesmo host da Natasha)
+//   4) arquivos .key do cofre-ia (integra_gro_natasha.key)
+// Assim o operador NÃO precisa digitar o token — o sistema pega do cofre.
+let _cache = { valor: '', quando: 0 };
+export function lerTokenCofre() {
+  const agora = Date.now();
+  if (_cache.valor && agora - _cache.quando < 60000) return _cache.valor;
+  let tok = process.env.NATASHA_TOKEN || getConfig('natasha_token') || '';
+  if (!tok) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync('/etc/natasha/config.json', 'utf8'));
+      tok = cfg?.gro?.token || cfg?.gro_token || cfg?.integra?.gro_natasha || '';
+    } catch { /* não está neste host */ }
+  }
+  if (!tok) {
+    for (const p of ['/home1/drcesarferreirac/cofre-ia/integra_gro_natasha.key',
+      '/etc/natasha/integra_gro_natasha.key', '/opt/cofre-ia/integra_gro_natasha.key']) {
+      try { const t = fs.readFileSync(p, 'utf8').trim(); if (t) { tok = t; break; } } catch { /* próximo */ }
+    }
+  }
+  if (tok) _cache = { valor: tok, quando: agora };
+  return tok;
+}
+
 function tokenOk(req) {
-  const esperado = process.env.NATASHA_TOKEN || getConfig('natasha_token') || '';
+  const esperado = lerTokenCofre();
   const veio = req.get('X-Natasha-Token') || req.query.token || '';
   return esperado && veio && String(veio) === String(esperado);
 }
