@@ -394,7 +394,7 @@ export function limparNomeInteressado(bruto) {
   let s = String(bruto || '').replace(/\s+/g, ' ').trim();
   if (!s) return null;
   // pega o trecho após o último "REF." / "REFERENTE A" / "REFERENTE:"
-  const m = s.match(/\bREF(?:ER[EÊ]NTE)?\.?\s*(?:A|AO|AOS|[AÀ]S)?\s*[:\-]?\s*(.+)$/i);
+  const m = s.match(/\bREF(?:ER[EÊ]NTE)?\.?\s*(?:(?:A|AO|AOS|[AÀ]S)\s+)?[:\-]?\s*(.+)$/i);
   if (m && m[1]) s = m[1].trim();
   // remove prefixos de tipo de documento que às vezes sobram
   s = s.replace(/^(ASSENTAMENTO|PRONTU[AÁ]RIO|FUNCIONAL|PROCESSO|REQUERIMENTO|DESPACHO|OF[IÍ]CIO|MEMORANDO|LAUDO|ATESTADO|CERTID[AÃ]O|EM|DE|DO|DA)\b[\s:.-]*/gi, '').trim();
