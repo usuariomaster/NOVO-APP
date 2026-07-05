@@ -645,20 +645,34 @@ async function renderServidorDetalhe(id) {
   document.getElementById('s-salvar').onclick = salvarFicha;
   document.getElementById('s-salvar-2').onclick = salvarFicha;
 
-  // 🤖 Preencher com IA: cola o texto da ficha funcional e a IA extrai os campos.
+  // 🤖 Preencher com IA: OCR de foto/PDF OU texto colado -> preenche a ficha.
   document.getElementById('s-ia-ficha').onclick = async () => {
-    const r = await modal({
-      titulo: '🤖 Preencher ficha com IA',
+    let arquivos = [];
+    let leitura = Promise.resolve();
+    const p = modal({
+      titulo: '🤖 Preencher ficha com IA (OCR)',
       okLabel: 'Extrair',
-      corpo: `<p class="muted">Cole o texto da ficha funcional (do sistema de RH ou do documento do SEI).
-        A IA vai preencher os campos abaixo — <b>confira e salve</b>.</p>
-        <div class="field"><label>Texto da ficha</label>
-        <textarea name="texto" style="min-height:200px" placeholder="Cole aqui os DADOS CADASTRAIS DO FUNCIONÁRIO…"></textarea></div>`,
+      corpo: `<p class="muted">Anexe uma <b>foto, print ou PDF</b> da ficha funcional (a IA lê por OCR)
+        <b>ou</b> cole o texto. Depois <b>confira e salve</b>.</p>
+        <div class="field"><label>📷 Foto / PDF da ficha (pode selecionar várias páginas)</label>
+        <input type="file" id="ia-ficha-arq" accept="image/*,application/pdf" multiple></div>
+        <div class="field"><label>ou cole o texto</label>
+        <textarea name="texto" style="min-height:150px" placeholder="Cole aqui os DADOS CADASTRAIS DO FUNCIONÁRIO…"></textarea></div>`,
     });
-    if (!r || !r.texto || r.texto.trim().length < 20) return;
-    toast('Lendo a ficha com IA…');
+    const inp = document.getElementById('ia-ficha-arq');
+    if (inp) inp.onchange = () => {
+      leitura = Promise.all([...inp.files].slice(0, 8).map((f) =>
+        new Promise((res) => { const rd = new FileReader(); rd.onload = () => res({ base64: rd.result, mime: f.type || 'image/png' }); rd.readAsDataURL(f); })
+      )).then((a) => { arquivos = a; });
+    };
+    const r = await p;
+    if (!r) return;
+    await leitura;
+    const temTexto = r.texto && r.texto.trim().length >= 20;
+    if (!arquivos.length && !temTexto) return toast('Anexe uma imagem/PDF ou cole o texto da ficha.', true);
+    toast(arquivos.length ? 'Lendo a imagem/PDF com IA (OCR)… aguarde' : 'Lendo a ficha com IA…');
     try {
-      const { campos } = await api.post('/api/ia/extrair-ficha', { texto: r.texto });
+      const { campos } = await api.post('/api/ia/extrair-ficha', arquivos.length ? { arquivos } : { texto: r.texto });
       let n = 0;
       for (const [k, v] of Object.entries(campos || {})) {
         const el = document.querySelector(`[data-campo="${k}"]`);

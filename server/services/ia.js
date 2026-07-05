@@ -38,13 +38,15 @@ function lerChave() {
 }
 
 // ---- Chamada bruta ao Claude. Se json=true, tenta devolver objeto. ----
-export async function chamarClaude({ system, prompt, maxTokens = 1500, json = false }) {
+// content, quando informado, substitui prompt (usado para visão: blocos
+// de imagem/documento + texto).
+export async function chamarClaude({ system, prompt, content, maxTokens = 1500, json = false }) {
   const chave = lerChave();
   const corpo = {
     model: modeloAtual(),
     max_tokens: maxTokens,
     ...(system ? { system } : {}),
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: content || prompt }],
   };
   const resp = await fetch(API_URL, {
     method: 'POST',
@@ -88,28 +90,54 @@ const CAMPOS_FICHA = [
   'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email',
 ];
 
-export async function extrairFichaFuncional(texto) {
-  const system =
-    'Você extrai dados de fichas funcionais de servidores públicos (RH da Prefeitura de Nova Iguaçu). ' +
-    'Devolva SOMENTE um objeto JSON, sem comentários. Use exatamente as chaves pedidas. ' +
-    'Datas no formato AAAA-MM-DD. Se um campo não existir no texto, use string vazia. ' +
-    'Não invente dados.';
-  const prompt =
-    `Extraia os campos abaixo desta ficha funcional e devolva um JSON com estas chaves:\n` +
-    CAMPOS_FICHA.join(', ') +
-    `\n\nObservações de mapeamento: "Unidade de Trabalho"=unidade_trabalho, ` +
-    `"Classificação Funcional"=classificacao_funcional (também pode preencher "cargo"/"funcao"), ` +
-    `"Secretaria"=secretaria (também lotacao), "Nº da Portaria"=num_portaria, ` +
-    `"Data da Posse"=data_posse, "Data do Exercício"=data_exercicio, "Identidade"=identidade.\n\n` +
-    `FICHA FUNCIONAL:\n"""${String(texto).slice(0, 12000)}"""`;
-  const obj = await chamarClaude({ system, prompt, maxTokens: 2000, json: true });
-  // mantém só as chaves conhecidas e não-vazias
+const SYSTEM_FICHA =
+  'Você extrai dados de fichas funcionais de servidores públicos (RH da Prefeitura de Nova Iguaçu). ' +
+  'Devolva SOMENTE um objeto JSON, sem comentários. Use exatamente as chaves pedidas. ' +
+  'Datas no formato AAAA-MM-DD. Se um campo não existir, use string vazia. Não invente dados.';
+const INSTRUCAO_FICHA =
+  `Extraia os campos abaixo da ficha funcional e devolva um JSON com estas chaves:\n` +
+  CAMPOS_FICHA.join(', ') +
+  `\n\nMapeamento: "Unidade de Trabalho"=unidade_trabalho, ` +
+  `"Classificação Funcional"=classificacao_funcional (também pode preencher "cargo"/"funcao"), ` +
+  `"Secretaria"=secretaria (também lotacao), "Nº da Portaria"=num_portaria, ` +
+  `"Data da Posse"=data_posse, "Data do Exercício"=data_exercicio, "Identidade"=identidade.`;
+
+// Mantém só as chaves conhecidas e não-vazias.
+function limparFicha(obj) {
   const limpo = {};
   for (const c of CAMPOS_FICHA) {
     const v = obj[c];
     if (v !== undefined && v !== null && String(v).trim() !== '') limpo[c] = String(v).trim();
   }
   return limpo;
+}
+
+// A partir de TEXTO colado.
+export async function extrairFichaFuncional(texto) {
+  const prompt = `${INSTRUCAO_FICHA}\n\nFICHA FUNCIONAL:\n"""${String(texto).slice(0, 12000)}"""`;
+  const obj = await chamarClaude({ system: SYSTEM_FICHA, prompt, maxTokens: 2000, json: true });
+  return limparFicha(obj);
+}
+
+// A partir de ARQUIVO (imagem ou PDF) — OCR pela visão do Claude.
+// arquivos = [{ base64, mime }] (uma ou mais páginas/imagens).
+export async function extrairFichaDeArquivos(arquivos) {
+  const blocos = [];
+  for (const a of arquivos.slice(0, 8)) {
+    const mime = String(a.mime || '').toLowerCase();
+    const data = String(a.base64 || '').includes(',') ? a.base64.split(',')[1] : a.base64;
+    if (!data) continue;
+    if (mime.includes('pdf')) {
+      blocos.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } });
+    } else {
+      const mt = /jpe?g/.test(mime) ? 'image/jpeg' : /webp/.test(mime) ? 'image/webp' : /gif/.test(mime) ? 'image/gif' : 'image/png';
+      blocos.push({ type: 'image', source: { type: 'base64', media_type: mt, data } });
+    }
+  }
+  if (!blocos.length) throw new Error('Nenhuma imagem/PDF válido para OCR.');
+  blocos.push({ type: 'text', text: `${INSTRUCAO_FICHA}\n\nLeia a(s) imagem(ns)/documento acima (ficha funcional do RH) e devolva o JSON.` });
+  const obj = await chamarClaude({ system: SYSTEM_FICHA, content: blocos, maxTokens: 2000, json: true });
+  return limparFicha(obj);
 }
 
 // ---- Gera PPP/LTCAT/PCMSO a partir do CBO e das atividades ----

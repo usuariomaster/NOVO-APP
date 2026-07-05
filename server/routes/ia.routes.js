@@ -5,7 +5,7 @@ import db from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import {
   temChave, modeloAtual, guardarChave, definirModelo, testarChave,
-  extrairFichaFuncional, enriquecerPorCBO,
+  extrairFichaFuncional, extrairFichaDeArquivos, enriquecerPorCBO,
 } from '../services/ia.js';
 
 const router = Router();
@@ -34,14 +34,19 @@ router.post('/testar', exigirPapel('admin', 'admin_master'), async (req, res) =>
   }
 });
 
-// Extrai a ficha funcional colada em texto -> campos do servidor (não salva).
+// Extrai a ficha funcional -> campos do servidor (não salva).
+// Aceita { texto } (colado) OU { arquivos:[{base64,mime}] } (OCR por imagem/PDF).
 router.post('/extrair-ficha', exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_admin'), async (req, res) => {
-  const { texto } = req.body || {};
-  if (!texto || String(texto).trim().length < 20) {
-    return res.status(400).json({ erro: 'Cole o texto da ficha funcional.' });
-  }
+  const { texto, arquivos } = req.body || {};
   try {
-    const campos = await extrairFichaFuncional(texto);
+    let campos;
+    if (Array.isArray(arquivos) && arquivos.length) {
+      campos = await extrairFichaDeArquivos(arquivos);
+    } else if (texto && String(texto).trim().length >= 20) {
+      campos = await extrairFichaFuncional(texto);
+    } else {
+      return res.status(400).json({ erro: 'Cole o texto ou anexe uma imagem/PDF da ficha.' });
+    }
     res.json({ campos });
   } catch (e) {
     res.status(502).json({ erro: e.message });
