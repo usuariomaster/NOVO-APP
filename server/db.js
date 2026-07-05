@@ -229,39 +229,10 @@ garantirColuna('processos', 'data_encaminhado', 'data_encaminhado TEXT');
 garantirColuna('processos', 'arquivado', 'arquivado INTEGER NOT NULL DEFAULT 0');
 garantirColuna('processos', 'arquivado_em', 'arquivado_em TEXT');
 
-// Ocorrências / BIM (Boletim de Inspeção Médica): cada perícia de um servidor.
-// Reaproveita a tabela afastamentos, acrescentando data da perícia, conclusão
-// e o perito responsável, para virar um boletim individualizado por processo.
-garantirColuna('afastamentos', 'data_pericia', 'data_pericia TEXT');
-garantirColuna('afastamentos', 'conclusao', 'conclusao TEXT');
-garantirColuna('afastamentos', 'perito', 'perito TEXT');
-garantirColuna('afastamentos', 'bim_numero', 'bim_numero TEXT');
-// Campos do BIM oficial (parecer médico pericial)
-garantirColuna('afastamentos', 'natureza', 'natureza TEXT');        // Licença inicial/Prorrogação/Alta/Aposentadoria por invalidez
-garantirColuna('afastamentos', 'beneficiario', 'beneficiario TEXT'); // Próprio/Familiar
-garantirColuna('afastamentos', 'remunerado', 'remunerado TEXT');     // Com/Sem remuneração
-garantirColuna('afastamentos', 'bim_anterior', 'bim_anterior TEXT');
-garantirColuna('afastamentos', 'licenca_anterior_dias', 'licenca_anterior_dias INTEGER');
-// Número de prontuário interno da perícia (por servidor)
-garantirColuna('servidores', 'prontuario', 'prontuario TEXT');
-// WhatsApp do servidor (para a Natasha responder o resultado)
-garantirColuna('servidores', 'whatsapp', 'whatsapp TEXT');
-
-// Fila de saída para a Natasha (mensagens a enviar ao servidor no WhatsApp).
-// A Natasha consulta acao=outbox, envia, e confirma com acao=outbox_ack.
-db.exec(`
-CREATE TABLE IF NOT EXISTS wa_outbox (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  telefone     TEXT,
-  texto        TEXT NOT NULL,
-  servidor_id  INTEGER,
-  processo_id  INTEGER,
-  status       TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente','enviado','erro')),
-  criado_em    TEXT NOT NULL DEFAULT (datetime('now')),
-  enviado_em   TEXT
-);`);
-
-// Servidor periciado (a pessoa dos processos) — vínculo com o processo
+// Servidor periciado (a pessoa dos processos) — vínculo com o processo.
+// As tabelas abaixo são criadas ANTES das migrações de coluna que as
+// referenciam (garantirColuna 'afastamentos'/'servidores'), para que a
+// primeira instalação (banco vazio) não falhe com "no such table".
 garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');
 
 // Cadastro de servidores periciados + ficha funcional (base para PPP)
@@ -316,6 +287,38 @@ CREATE TABLE IF NOT EXISTS servidor_comentarios (
 CREATE INDEX IF NOT EXISTS idx_afast_serv ON afastamentos(servidor_id);
 CREATE INDEX IF NOT EXISTS idx_proc_serv ON processos(servidor_id);
 `);
+
+// Ocorrências / BIM (Boletim de Inspeção Médica): cada perícia de um servidor.
+// Reaproveita a tabela afastamentos, acrescentando data da perícia, conclusão
+// e o perito responsável, para virar um boletim individualizado por processo.
+garantirColuna('afastamentos', 'data_pericia', 'data_pericia TEXT');
+garantirColuna('afastamentos', 'conclusao', 'conclusao TEXT');
+garantirColuna('afastamentos', 'perito', 'perito TEXT');
+garantirColuna('afastamentos', 'bim_numero', 'bim_numero TEXT');
+// Campos do BIM oficial (parecer médico pericial)
+garantirColuna('afastamentos', 'natureza', 'natureza TEXT');        // Licença inicial/Prorrogação/Alta/Aposentadoria por invalidez
+garantirColuna('afastamentos', 'beneficiario', 'beneficiario TEXT'); // Próprio/Familiar
+garantirColuna('afastamentos', 'remunerado', 'remunerado TEXT');     // Com/Sem remuneração
+garantirColuna('afastamentos', 'bim_anterior', 'bim_anterior TEXT');
+garantirColuna('afastamentos', 'licenca_anterior_dias', 'licenca_anterior_dias INTEGER');
+// Número de prontuário interno da perícia (por servidor)
+garantirColuna('servidores', 'prontuario', 'prontuario TEXT');
+// WhatsApp do servidor (para a Natasha responder o resultado)
+garantirColuna('servidores', 'whatsapp', 'whatsapp TEXT');
+
+// Fila de saída para a Natasha (mensagens a enviar ao servidor no WhatsApp).
+// A Natasha consulta acao=outbox, envia, e confirma com acao=outbox_ack.
+db.exec(`
+CREATE TABLE IF NOT EXISTS wa_outbox (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  telefone     TEXT,
+  texto        TEXT NOT NULL,
+  servidor_id  INTEGER,
+  processo_id  INTEGER,
+  status       TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente','enviado','erro')),
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now')),
+  enviado_em   TEXT
+);`);
 
 // --- Ficha funcional completa do servidor (RH da Prefeitura) ---
 // Todos os campos da tela "Dados Cadastrais do Funcionário" para
