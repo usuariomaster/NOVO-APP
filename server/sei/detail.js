@@ -378,6 +378,62 @@ async function capturarFichaImagens(page) {
   return { imagens, rotulos, motivo: imagens.length ? null : 'Não consegui capturar o conteúdo dos documentos.' };
 }
 
+// Captura CADA documento do processo como imagem (print do conteúdo) e monta
+// o PDF do processo NÓS MESMOS — sem depender do "Gerar PDF" do SEI (que falha).
+// Devolve [{numero, tipo, img(base64)}] na ordem da árvore.
+async function capturarDocumentosVisual(page, limite = 40) {
+  const arvore = await acharArvore(page);
+  if (!arvore) return [];
+  let anchors = [];
+  try {
+    anchors = await arvore.$$eval('a', (els) =>
+      els.map((el, i) => ({ i, t: (el.textContent || '').trim() })).filter((x) => /\d{6,9}/.test(x.t))
+    );
+  } catch { return []; }
+  // deduplica por número de documento (a árvore repete o mesmo doc)
+  const vistos = new Set();
+  const out = [];
+  for (const a of anchors) {
+    const m = a.t.match(/(\d{6,9})/);
+    const numero = m ? m[1] : '';
+    if (numero && vistos.has(numero)) continue;
+    if (numero) vistos.add(numero);
+    if (out.length >= limite) break;
+    try {
+      const link = arvore.locator('a').nth(a.i);
+      if (!(await link.count())) continue;
+      await link.click({ timeout: 10000 });
+      await page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => {});
+      await page.waitForTimeout(800);
+      const img = await screenshotConteudo(page);
+      if (img) out.push({ numero, tipo: a.t.replace(/\(?\b\d{6,9}\b\)?/, '').replace(/[()]/g, '').trim() || 'Documento', img });
+    } catch { /* próximo */ }
+  }
+  return out;
+}
+
+// Monta um PDF (A4, um documento por página) a partir das imagens capturadas,
+// usando o próprio Chromium do robô. Salva em `destino`. Retorna true/false.
+async function montarPdfDocumentos(context, numeroSei, docsImg, destino) {
+  if (!docsImg.length) return false;
+  const esc = (x) => String(x ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const paginas = docsImg.map((d, i) => `
+    <section style="${i ? 'page-break-before:always;' : ''}padding:8px 0">
+      <div style="font:600 12px Arial;color:#333;border-bottom:1px solid #ccc;padding-bottom:4px;margin-bottom:6px">
+        ${esc(d.tipo)} ${esc(d.numero)} &nbsp;·&nbsp; ${esc(numeroSei)}</div>
+      <img src="data:image/png;base64,${d.img}" style="width:100%;display:block" />
+    </section>`).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:12mm}body{margin:0}</style></head><body>${paginas}</body></html>`;
+  let pg = null;
+  try {
+    pg = await context.newPage();
+    await pg.setContent(html, { waitUntil: 'load', timeout: 30000 });
+    await pg.pdf({ path: destino, format: 'A4', printBackground: true });
+    return true;
+  } catch { return false; }
+  finally { if (pg) await pg.close().catch(() => {}); }
+}
+
 // Abre o processo e captura a ficha (usado no botão avulso do servidor).
 async function capturarFichaDoProcesso(page, baseUrl, numeroSei) {
   await abrirProcesso(page, baseUrl, numeroSei);
@@ -449,9 +505,27 @@ async function detalharNaPagina(page, baseUrl, dados) {
   if (dados.capturarFicha) {
     try { const cap = await capturarFichaImagens(page); fichaImagens = cap.imagens || []; } catch { /* ignora */ }
   }
+  // PDF do processo: capturamos CADA documento como imagem e montamos o PDF
+  // nós mesmos (confiável). Cada documento vira também um arquivo local, para
+  // o link "Abrir" abrir o PDF/imagem — nunca o site do SEI.
   let pdfProcesso = null;
   if (dados.dir && dados.genPdf) {
-    pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
+    try {
+      const docsImg = await capturarDocumentosVisual(page);
+      for (const d of docsImg) {
+        try {
+          const fn = `doc-${d.numero || Math.random().toString(36).slice(2, 8)}.png`;
+          fs.writeFileSync(join(dados.dir, fn), Buffer.from(d.img, 'base64'));
+          d.arquivo = fn;
+          const doc = documentos.find((x) => x.numero === d.numero);
+          if (doc) doc.arquivo = fn; else documentos.push({ numero: d.numero, tipo: d.tipo, link_sei: '', arquivo: fn });
+        } catch { /* ignora */ }
+      }
+      const nomePdf = `processo-${dados.processoId}.pdf`;
+      if (await montarPdfDocumentos(page.context(), dados.numeroSei, docsImg, join(dados.dir, nomePdf))) pdfProcesso = nomePdf;
+      // fallback: se não capturou nada por imagem, tenta o Gerar PDF nativo.
+      if (!pdfProcesso) pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
+    } catch { /* ignora */ }
   }
   const meta = await coletarMetadados(page);
   const amostraMeta = meta._amostra; delete meta._amostra;

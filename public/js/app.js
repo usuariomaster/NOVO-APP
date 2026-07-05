@@ -1272,11 +1272,11 @@ async function renderProcessoDetalhe(id) {
 
   const docs = p.documentos.length
     ? p.documentos.map((d) => {
-        // Link para abrir o documento: PDF baixado > link direto no SEI.
-        const alvo = d.arquivo ? `/api/processos/${p.id}/documento/${d.id}/arquivo` : (d.link_sei || '');
+        // Abre SEMPRE o arquivo local (PDF/imagem capturado) — nunca o site do SEI.
+        const alvo = d.arquivo ? `/api/processos/${p.id}/documento/${d.id}/arquivo` : '';
         const abrir = alvo
           ? `<a class="btn secondary sm" href="${esc(alvo)}" target="_blank" rel="noopener">🔎 Abrir</a>`
-          : '';
+          : '<span class="muted" style="font-size:12px">sem arquivo — use “Buscar conteúdo no SEI”</span>';
         const titulo = alvo
           ? `<a href="${esc(alvo)}" target="_blank" rel="noopener" style="text-decoration:none"><b>${esc(d.tipo || 'Documento')}</b></a>`
           : `<b>${esc(d.tipo || 'Documento')}</b>`;
@@ -1330,7 +1330,8 @@ async function renderProcessoDetalhe(id) {
           </div>
         </div>
         <div class="card">
-          <div class="card-h">Documentos do SEI</div>
+          <div class="card-h">Documentos do SEI
+            ${p.pdf_processo ? `<a class="btn sm" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener">📄 Ver processo completo (PDF)</a>` : ''}</div>
           <div class="card-b">${docs}</div>
         </div>
         ${renderAreaDespacho(p, isOper, isPerito)}
@@ -1532,22 +1533,19 @@ function ligarAcoes(p, isOper, isPerito) {
       const box = (titulo, t) => t
         ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
            <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(t)}</textarea>` : '';
-      // Só mostra a calibração quando NÃO veio NEM o PDF NEM os dados — aí
-      // realmente não deu pra aproveitar nada. Se o PDF veio, é sucesso.
-      if (r.modo === 'sei' && semMeta && !r.pdfProcesso) {
+      // Só mostra a calibração quando NÃO veio NADA (nem documentos, nem PDF,
+      // nem dados). Com documentos capturados, é sucesso — sem modal alarmante.
+      if (r.modo === 'sei' && semMeta && !r.pdfProcesso && !r.documentos) {
         await modal({
-          titulo: 'Não consegui ler os dados nem gerar o PDF',
+          titulo: 'Não achei conteúdo neste processo',
           okLabel: 'Fechar',
-          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s), mas não li os dados (interessado/assunto) nem gerei o PDF.</p>
-            <p class="muted">👉 Clique no quadro, <b>Ctrl+A</b>, copie e <b>cole aqui no chat</b> para eu calibrar:</p>
-            ${box('Campos da autuação (interessado/assunto):', r.amostraMeta)}
-            ${box('Tela do processo:', r.amostra)}
-            ${!r.amostraMeta && !r.amostra ? '<i>Sem amostra desta vez.</i>' : ''}`,
+          corpo: `<p>O robô abriu o processo mas não encontrou documentos.</p>
+            <p class="muted">Se precisar de ajuste, copie o quadro (Ctrl+A) e cole aqui:</p>
+            ${box('Tela do processo:', r.amostra)}`,
         });
       } else if (r.modo === 'sei') {
         const partes = [`${r.documentos} doc(s)`];
-        if (r.pdfProcesso) partes.push('PDF gerado (dá para consultar/imprimir)');
-        else partes.push('sem PDF desta vez');
+        if (r.pdfProcesso) partes.push('PDF do processo gerado');
         if (!semMeta) partes.push('dados preenchidos');
         toast(`Conteúdo atualizado: ${partes.join(', ')}${r.fichaMsg || ''}.`, /sem ficha/.test(r.fichaMsg || ''));
       } else {
