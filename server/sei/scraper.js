@@ -367,6 +367,59 @@ async function unidadeAtual(page) {
   return null;
 }
 
+// Lê, DIRETO do DOM (sem clicar em nada), os links de troca de unidade que o
+// SEI já renderiza — normalmente escondidos na barra superior/rodapé
+// (divInfraSelecaoUnidade). Cada link já traz o infra_hash da sessão, então
+// navegar nele TROCA a unidade de forma confiável, sem depender de abrir
+// popup/menu (que era o ponto onde a extração das 2 unidades falhava).
+async function coletarUnidadesDireto(page) {
+  const vistos = new Set();
+  const unidades = [];
+  for (const f of page.frames()) {
+    let itens = [];
+    try {
+      itens = await f.$$eval(
+        'a[href*="infra_unidade_alterar"], a[href*="unidade_alterar"], a[href*="id_unidade="], a[onclick*="infraSelecionarUnidade"], a[onclick*="infraTrocarUnidade"], a[onclick*="SelecionarUnidade"]',
+        (els) => els.map((e) => ({
+          t: (e.textContent || e.getAttribute('title') || '').trim(),
+          abs: e.href || '',
+          o: (e.getAttribute('onclick') || '').slice(0, 260),
+        }))
+      );
+    } catch { continue; }
+    for (const a of itens) {
+      const alvo = `${a.abs} ${a.o}`;
+      const m = alvo.match(/id_unidade=(\d+)/i) || alvo.match(/(?:infraSelecionar|infraTrocar|Selecionar)Unidade\(\s*'?(\d+)/i);
+      const id = m ? m[1] : null;
+      const chave = id || a.t;
+      if (!chave || vistos.has(chave)) continue;
+      let nome = a.t;
+      if (!nome) {
+        const mn = a.o.match(/(?:infraSelecionar|infraTrocar|Selecionar)Unidade\([^,]*,\s*'([^']+)'/i);
+        nome = mn ? mn[1] : (id ? `Unidade #${id}` : '');
+      }
+      if (!nome) continue;
+      vistos.add(chave);
+      unidades.push({ nome: nome.trim(), id, href: /^https?:/.test(a.abs) ? a.abs : '' });
+    }
+  }
+  return unidades;
+}
+
+// Navega para uma unidade usando o link pronto (com infra_hash) ou, na falta
+// dele, a URL de troca por id. É o caminho preferencial de troca de unidade.
+async function irParaUnidade(page, unidade, baseUrl) {
+  const url = unidade.href
+    || (unidade.id && baseUrl ? `${baseUrl}/controlador.php?acao=infra_unidade_alterar&id_unidade=${unidade.id}` : '');
+  if (!url) return false;
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    return true;
+  } catch { return false; }
+}
+
 // Seletores do controle "Alterar Unidade" no topo do SEI 4.x.
 const SEL_UNIDADE = [
   '#lnkInfraUnidade',
@@ -562,15 +615,30 @@ export async function extrairProcessos(cfg, mock) {
     for (const p of r1.processos) todos.push(p);
     porUnidade[nomeAtual] = r1.processos.length;
 
-    // 2) Demais unidades permitidas — o robô troca de unidade sozinho.
-    const { unidades, debug: debugUnidades } = await listarUnidades(page, auth.context, nomeAtual);
-    const resumoUnidades = `Unidade atual: ${nomeAtual}\nEncontradas: ${unidades.map((u) => u.nome + (u.id ? ` (#${u.id})` : '')).join(' | ') || '(nenhuma)'}\n\n${debugUnidades}`;
+    // 2) Demais unidades permitidas — o robô troca de unidade SOZINHO.
+    //    Caminho 1 (preferencial): lê os links de troca já prontos no DOM
+    //    (com infra_hash), sem abrir popup. Caminho 2 (fallback): abre a
+    //    seleção de unidade e parseia. Assim as 2 unidades (SEMUS-PERÍCIA e
+    //    SEMUS-PROTOCOLO PERÍCIA) entram automaticamente, sem trocar no SEI.
+    let unidades = await coletarUnidadesDireto(page);
+    let debugUnidades = `via DOM direto: ${unidades.map((u) => u.nome + (u.id ? ` (#${u.id})` : '')).join(' | ') || '(nenhuma)'}`;
+    if (!unidades.length) {
+      const rPopup = await listarUnidades(page, auth.context, nomeAtual);
+      unidades = rPopup.unidades;
+      debugUnidades += `\n\nvia popup:\n${unidades.map((u) => u.nome + (u.id ? ` (#${u.id})` : '')).join(' | ') || '(nenhuma)'}\n\n${rPopup.debug}`;
+    }
+    if (!unidades.length) {
+      debugUnidades += `\n\n${await dumpTopoUnidade(page)}`;
+    }
+    const resumoUnidades = `Unidade atual: ${nomeAtual}\n${debugUnidades}`;
     try { fs.writeFileSync(join(DIR_DIAG, 'debug-unidades.txt'), resumoUnidades, 'utf8'); } catch { /* ignora */ }
     // Deduplica número de processo já visto (nunca traz duplicidade entre unidades).
     const jaVistos = new Set(todos.map((p) => p.numero_sei));
     for (const u of unidades) {
-      if (u.nome === nomeAtual) continue;
-      const ok = await trocarUnidade(page, auth.context, u, auth.baseUrl);
+      // Pula a própria unidade atual (por nome OU por já não trazer novidade).
+      if (u.nome && nomeAtual && u.nome.toUpperCase() === String(nomeAtual).toUpperCase()) continue;
+      let ok = await irParaUnidade(page, u, auth.baseUrl);
+      if (!ok) ok = await trocarUnidade(page, auth.context, u, auth.baseUrl);
       if (!ok) continue;
       // depois de trocar, volta ao Controle de Processos da nova unidade
       await clicarControle(page);
