@@ -311,6 +311,7 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
   try {
     if (r.amostra) writeFileSync(join(DIR_COMPROVANTES, 'debug-processo.txt'), r.amostra, 'utf8');
     if (r.amostraDoc) writeFileSync(join(DIR_COMPROVANTES, 'debug-documento.txt'), r.amostraDoc, 'utf8');
+    if (r.amostraMeta) writeFileSync(join(DIR_COMPROVANTES, 'debug-metadados.txt'), r.amostraMeta, 'utf8');
   } catch { /* ignora */ }
 
   // Mantém apenas UMA ocorrência de "conteúdo buscado" no histórico

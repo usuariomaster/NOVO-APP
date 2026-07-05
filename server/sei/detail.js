@@ -186,23 +186,63 @@ async function gerarPdfProcesso(page, dir, processoId) {
   return null;
 }
 
-// Tenta ler interessado/tipo/especificação a partir do texto das telas.
+// Abre a "autuação" do processo (Consultar/Alterar Processo) e lê
+// Tipo, Especificação e Interessados. Também devolve uma amostra da tela
+// para calibração remota.
 async function coletarMetadados(page) {
-  let texto = '';
-  for (const frame of page.frames()) {
+  // 1) Tenta abrir a tela de dados do processo.
+  try {
+    for (const f of page.frames()) {
+      const link = f
+        .locator('a[href*="procedimento_alterar"], a[href*="procedimento_consultar"], img[title*="Consultar/Alterar Processo"], img[title*="Consultar Processo"]')
+        .first();
+      if (await link.count()) {
+        await link.click({ timeout: 10000 });
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(1200);
+        break;
+      }
+    }
+  } catch { /* segue com o que tiver */ }
+
+  // 2) Lê os campos do formulário (vários IDs possíveis) + heurística por rótulo.
+  const meta = { interessado: null, tipo: null, especificacao: null };
+  let amostra = '';
+  for (const f of page.frames()) {
     try {
-      texto += '\n' + (await frame.evaluate(() => document.body ? document.body.innerText : ''));
+      const d = await f.evaluate(() => {
+        const val = (sel) => {
+          const e = document.querySelector(sel);
+          if (!e) return null;
+          if (e.tagName === 'SELECT') { const o = e.options[e.selectedIndex]; return o ? o.textContent.trim() : null; }
+          return (e.value || e.textContent || '').trim() || null;
+        };
+        const tipo = val('#selTipoProcedimento') || val('select[id*="Tipo"]');
+        const espec = val('#txtDescricao') || val('#txtEspecificacao') || val('input[id*="Descricao"]') || val('input[id*="Especific"]');
+        let inter = null;
+        const selInt = document.querySelector('#selInteressados, select[id*="Interessad"]');
+        if (selInt && selInt.options) inter = Array.from(selInt.options).map((o) => o.textContent.trim()).filter(Boolean).join('; ') || null;
+        if (!inter) {
+          const t = document.querySelector('[id*="Interessad"], [id*="tblInteressados"]');
+          if (t) inter = (t.innerText || '').trim().split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 3).join('; ') || null;
+        }
+        // amostra: rótulos + campos visíveis
+        const campos = Array.from(document.querySelectorAll('input,select,textarea'))
+          .map((e) => `${e.id || e.name || ''}=${(e.value || (e.tagName === 'SELECT' && e.options[e.selectedIndex]?.textContent) || '').toString().trim().slice(0, 40)}`)
+          .filter((x) => x.length > 1).slice(0, 40);
+        const txt = (document.body ? document.body.innerText : '').trim().slice(0, 900);
+        return { tipo, espec, inter, campos, txt };
+      });
+      if (d.tipo && !meta.tipo) meta.tipo = d.tipo;
+      if (d.espec && !meta.especificacao) meta.especificacao = d.espec;
+      if (d.inter && !meta.interessado) meta.interessado = d.inter;
+      if ((d.txt || d.campos.length)) {
+        amostra += `--- ${f.url().slice(0, 70)} ---\nCAMPOS:\n${d.campos.join('\n')}\nTEXTO:\n${d.txt}\n\n`;
+      }
     } catch { /* ignora */ }
   }
-  const pegar = (re) => {
-    const m = texto.match(re);
-    return m ? m[1].trim().split('\n')[0].slice(0, 300) : null;
-  };
-  return {
-    interessado: pegar(/Interessad[oa]s?:?\s*(.+)/i),
-    tipo: pegar(/Tipo(?:\s+do\s+Processo)?:?\s*(.+)/i),
-    especificacao: pegar(/Especifica[çc][ãa]o:?\s*(.+)/i),
-  };
+  meta._amostra = amostra.slice(0, 8000);
+  return meta;
 }
 
 // Amostra de texto/campos de todos os quadros, para calibração.
@@ -259,7 +299,6 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
     await abrirProcesso(page, auth.baseUrl, dados.numeroSei);
 
     const documentos = await coletarDocumentos(page);
-    const meta = await coletarMetadados(page);
     const amostra = await coletarAmostra(page);
     const debug = await salvarDiagnostico(page, `debug-processo`);
     // Gera o PDF do processo inteiro (para consulta/impressão/prontuário).
@@ -267,7 +306,10 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
     if (dados.dir) {
       pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
     }
-    return { modo: 'sei', ...meta, documentos, pdfProcesso, amostra, debug };
+    // Metadados por último: navega para a autuação (Consultar/Alterar).
+    const meta = await coletarMetadados(page);
+    const amostraMeta = meta._amostra; delete meta._amostra;
+    return { modo: 'sei', ...meta, documentos, pdfProcesso, amostra, amostraMeta, debug };
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-processo-erro');
     throw e;
