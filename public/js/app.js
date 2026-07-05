@@ -98,6 +98,7 @@ const rotas = {
   '#painel': renderPainel,
   '#processos': renderProcessos,
   '#servidores': renderServidores,
+  '#ocorrencias': renderOcorrencias,
   '#mensageiro': renderMensageiro,
   '#usuarios': renderUsuarios,
   '#sei': renderConfigSei,
@@ -140,6 +141,7 @@ function shell(conteudo) {
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#processos">📁 ${isPerito ? 'Meus processos' : 'Processos'}</a>`,
     `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
+    `<a href="#ocorrencias">🩺 Ocorrências (CID)</a>`,
     isOper ? `<a href="#mensageiro">🚚 Mensageiro</a>` : '',
     isAdmin ? `<a href="#usuarios">👥 Usuários</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
@@ -332,6 +334,7 @@ async function renderProcessos() {
       <select id="filtro-status">
         <option value="">Todos os status</option>
         ${Object.entries(STATUS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+        <option value="arquivado">🗄️ Arquivados</option>
       </select>
       <select id="filtro-tipo">
         <option value="">Todos os tipos</option>
@@ -547,6 +550,39 @@ const GRUPOS_SERV = [
   ]],
 ];
 const CAMPOS_TEXTAREA = new Set(['pai', 'mae', 'observacoes', 'atividades', 'agentes_nocivos', 'ppp_atividades', 'ltcat', 'pcmso']);
+
+// Controle de ocorrências com CID — afastamentos de todos os servidores.
+async function renderOcorrencias() {
+  shell('<div class="empty">Carregando…</div>');
+  const desenhar = async (cid) => {
+    const r = await api.get('/api/processos/ocorrencias' + (cid ? '?cid=' + encodeURIComponent(cid) : ''));
+    const resumo = Object.entries(r.porCid || {}).sort((a, b) => b[1] - a[1])
+      .map(([c, n]) => `<span class="badge pr-normal" style="margin:2px">${esc(c)}: <b>${n}</b></span>`).join(' ');
+    const linhas = r.ocorrencias.length ? `<table>
+      <thead><tr><th>Servidor</th><th>CID</th><th>Tipo</th><th>Início</th><th>Fim</th><th>Dias</th><th>Processo</th></tr></thead>
+      <tbody>${r.ocorrencias.map((o) => `<tr data-serv="${o.servidor_id}" style="cursor:pointer">
+        <td><b>${esc(o.servidor_nome)}</b><br><span class="muted">${esc(o.matricula || '')}</span></td>
+        <td><b>${esc(o.cid || '—')}</b>${o.cid2 ? '/' + esc(o.cid2) : ''}</td>
+        <td>${esc(o.tipo || '—')}</td><td class="muted">${dataBR(o.data_inicio)}</td>
+        <td class="muted">${dataBR(o.data_fim)}</td><td>${o.dias ?? '—'}</td>
+        <td class="num-proc">${esc(o.numero_sei || '—')}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Nenhuma ocorrência registrada. Elas são criadas ao ler os despachos/afastamentos ou manualmente na ficha do servidor.</div>';
+    document.getElementById('oc-resumo').innerHTML = resumo || '<span class="muted">Sem CIDs ainda.</span>';
+    document.getElementById('oc-lista').innerHTML = linhas;
+    document.querySelectorAll('#oc-lista tr[data-serv]').forEach((tr) => { tr.onclick = () => (location.hash = `#servidor/${tr.dataset.serv}`); });
+  };
+  setMain(`
+    <div class="page-head"><div>
+      <h2>🩺 Ocorrências (CID)</h2>
+      <div class="desc">Afastamentos e licenças de todos os servidores, com CID — base para o controle epidemiológico e o PPP.</div>
+    </div></div>
+    <div class="toolbar"><input type="search" id="oc-busca" placeholder="Filtrar por CID (ex.: M54)"></div>
+    <div class="card"><div class="card-h">Resumo por CID</div><div class="card-b" id="oc-resumo">…</div></div>
+    <div class="card"><div id="oc-lista"><div class="empty">Carregando…</div></div></div>
+  `);
+  await desenhar('');
+  let deb; document.getElementById('oc-busca').oninput = (e) => { clearTimeout(deb); deb = setTimeout(() => desenhar(e.target.value.trim()), 300); };
+}
 
 async function renderServidores() {
   shell('<div class="empty">Carregando…</div>');
@@ -928,7 +964,10 @@ async function renderProcessoDetalhe(id) {
           ${p.link_sei ? `• <a href="${esc(p.link_sei)}" target="_blank" rel="noopener">abrir no SEI ↗</a>` : ''}
           ${p.conteudo_em ? `• <span class="muted">conteúdo atualizado em ${dataHora(p.conteudo_em)}</span>` : ''}</div>
       </div>
-      ${p.pdf_processo ? `<a class="btn" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener">📥 Baixar processo em PDF</a>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${p.pdf_processo ? `<a class="btn" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener">📥 Baixar processo em PDF</a>` : ''}
+        ${isOper ? `<button class="btn secondary" id="btn-arquivar">${p.arquivado ? '↩️ Desarquivar' : '🗄️ Arquivar'}</button>` : ''}
+      </div>
     </div>
     <div class="detail-grid">
       <div>
@@ -1111,6 +1150,15 @@ function ligarAcoes(p, isOper, isPerito) {
     await api.put('/api/processos/' + p.id, r);
     toast('Processo atualizado');
     recarrega();
+  };
+
+  // Arquivar / desarquivar
+  const btnArq = document.getElementById('btn-arquivar');
+  if (btnArq) btnArq.onclick = async () => {
+    const arquivar = !p.arquivado;
+    if (arquivar && !confirm('Arquivar este processo? Ele sai da lista ativa (fica em "Arquivados") e permanece no prontuário do servidor.')) return;
+    try { await api.post(`/api/processos/${p.id}/arquivar`, { arquivar }); toast(arquivar ? 'Processo arquivado' : 'Processo desarquivado'); location.hash = '#processos'; }
+    catch (e) { toast(e.message, true); }
   };
 
   // Buscar conteúdo no SEI

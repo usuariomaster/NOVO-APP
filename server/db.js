@@ -221,6 +221,9 @@ garantirColuna('processos', 'data_entrada', 'data_entrada TEXT');
 garantirColuna('processos', 'ficha_status', 'ficha_status TEXT');
 // Data em que o processo foi encaminhado/recebido na perícia (lida do SEI)
 garantirColuna('processos', 'data_encaminhado', 'data_encaminhado TEXT');
+// Arquivamento do processo (encerrado/guardado no prontuário do servidor)
+garantirColuna('processos', 'arquivado', 'arquivado INTEGER NOT NULL DEFAULT 0');
+garantirColuna('processos', 'arquivado_em', 'arquivado_em TEXT');
 
 // Servidor periciado (a pessoa dos processos) — vínculo com o processo
 garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');

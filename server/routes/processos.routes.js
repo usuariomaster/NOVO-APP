@@ -107,9 +107,11 @@ router.get('/', (req, res) => {
     where.push('p.perito_id = ?');
     params.push(req.usuario.id);
   }
-  if (status) {
-    where.push('p.status = ?');
-    params.push(status);
+  if (status === 'arquivado') {
+    where.push('p.arquivado = 1');
+  } else {
+    where.push('p.arquivado = 0');
+    if (status) { where.push('p.status = ?'); params.push(status); }
   }
   if (tipo) {
     where.push('p.tipo = ?');
@@ -136,6 +138,36 @@ router.get('/resumo', (req, res) => {
   const resumo = {};
   for (const l of linhas) resumo[l.status] = l.total;
   res.json(resumo);
+});
+
+// Arquivar / desarquivar processo (guarda no prontuário do servidor).
+router.post('/:id/arquivar', exigirPapel('operador', 'admin'), (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  const arquivar = req.body?.arquivar !== false;
+  db.prepare("UPDATE processos SET arquivado = ?, arquivado_em = CASE WHEN ? THEN datetime('now') ELSE NULL END, atualizado_em = datetime('now') WHERE id = ?")
+    .run(arquivar ? 1 : 0, arquivar ? 1 : 0, proc.id);
+  registrarHistorico({ processoId: proc.id, usuario: req.usuario, acao: arquivar ? 'arquivado' : 'desarquivado', detalhe: arquivar ? 'Processo arquivado' : 'Processo desarquivado' });
+  res.json({ ok: true, arquivado: arquivar });
+});
+
+// Controle de ocorrências com CID (afastamentos de todos os servidores).
+router.get('/ocorrencias', (req, res) => {
+  const cid = req.query.cid ? `%${req.query.cid}%` : null;
+  const linhas = db.prepare(
+    `SELECT a.id, a.tipo, a.cid, a.cid2, a.data_inicio, a.data_fim, a.dias, a.descricao,
+            s.id AS servidor_id, s.nome AS servidor_nome, s.matricula,
+            p.numero_sei
+     FROM afastamentos a
+     JOIN servidores s ON s.id = a.servidor_id
+     LEFT JOIN processos p ON p.id = a.processo_id
+     ${cid ? 'WHERE a.cid LIKE ? OR a.cid2 LIKE ?' : ''}
+     ORDER BY a.data_inicio DESC, a.id DESC`
+  ).all(...(cid ? [cid, cid] : []));
+  // resumo por CID
+  const porCid = {};
+  for (const l of linhas) { const k = l.cid || '(sem CID)'; porCid[k] = (porCid[k] || 0) + 1; }
+  res.json({ ocorrencias: linhas, porCid });
 });
 
 // Configuração de prazos (dias para o farol verde/amarelo/vermelho).
