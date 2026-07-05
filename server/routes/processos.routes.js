@@ -184,6 +184,21 @@ router.post('/:id/triar', exigirPapel('operador', 'admin'), (req, res) => {
   res.json({ ok: true, triado: triar });
 });
 
+// Avisar o servidor pelo WhatsApp (enfileira para a Natasha enviar).
+router.post('/:id/avisar-whatsapp', exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_admin'), (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  const s = proc.servidor_id ? db.prepare('SELECT * FROM servidores WHERE id = ?').get(proc.servidor_id) : null;
+  const telefone = (req.body?.telefone || s?.whatsapp || '').trim();
+  if (!telefone) return res.status(400).json({ erro: 'Sem número de WhatsApp do servidor. Informe o telefone.' });
+  const texto = (req.body?.texto || '').trim();
+  if (!texto) return res.status(400).json({ erro: 'Escreva a mensagem.' });
+  db.prepare('INSERT INTO wa_outbox (telefone, texto, servidor_id, processo_id) VALUES (?, ?, ?, ?)')
+    .run(telefone, texto, proc.servidor_id || null, proc.id);
+  registrarHistorico({ processoId: proc.id, usuario: req.usuario, acao: 'aviso_whatsapp', detalhe: 'Mensagem enfileirada para o WhatsApp do servidor' });
+  res.json({ ok: true });
+});
+
 // Controle de ocorrências com CID (afastamentos de todos os servidores).
 router.get('/ocorrencias', (req, res) => {
   const cid = req.query.cid ? `%${req.query.cid}%` : null;

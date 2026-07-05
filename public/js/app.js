@@ -393,11 +393,25 @@ async function renderCaixaEntrada() {
       <h2>📥 Caixa de entrada</h2>
       <div class="desc">O que chegou pelas 3 portas e ainda não foi triado. Identifique o servidor, confira e mande para a fila.</div>
     </div>
-    <button class="btn secondary" id="cx-extrair">⬇️ Extrair do SEI</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn secondary" id="cx-registrar">＋ Registrar entrada</button>
+      <button class="btn secondary" id="cx-extrair">⬇️ Extrair do SEI</button>
+    </div></div>
     <div class="kpis" id="cx-canais"></div>
     <div class="card"><div id="cx-lista"><div class="empty">Carregando…</div></div></div>
   `);
   document.getElementById('cx-extrair').onclick = () => { location.hash = '#fila'; setTimeout(extrairDoSei, 300); };
+  document.getElementById('cx-registrar').onclick = async () => {
+    const r = await modal({ titulo: 'Registrar entrada (físico / WhatsApp)', okLabel: 'Registrar', corpo: `
+      <div class="field"><label>Canal de entrada</label>
+        <select name="canal"><option value="fisico">🚚 Físico / malote</option><option value="whatsapp">💬 WhatsApp (manual)</option></select></div>
+      <div class="field"><label>Servidor / interessado</label><input name="interessado"></div>
+      <div class="field"><label>Assunto</label><input name="especificacao" placeholder="ex.: Atestado, Reconsideração"></div>
+      <div class="field"><label>Nº (deixe vazio para gerar automático)</label><input name="numero_sei"></div>` });
+    if (!r) return;
+    try { const c = await api.post('/api/processos/fisico', r); toast(`Entrada registrada: ${c.numero_sei}`); desenhar(); atualizarBadgeCaixa(); }
+    catch (e) { toast(e.message, true); }
+  };
   await desenhar();
 }
 
@@ -1295,6 +1309,7 @@ async function renderProcessoDetalhe(id) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${p.pdf_processo ? `<a class="btn" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener">📥 Baixar processo em PDF</a>` : ''}
+        <button class="btn secondary" id="btn-avisar-wa">📲 Avisar servidor (WhatsApp)</button>
         ${isOper ? `<button class="btn secondary" id="btn-arquivar">${p.arquivado ? '↩️ Desarquivar' : '🗄️ Arquivar'}</button>` : ''}
       </div>
     </div>
@@ -1482,6 +1497,19 @@ function ligarAcoes(p, isOper, isPerito) {
     await api.put('/api/processos/' + p.id, r);
     toast('Processo atualizado');
     recarrega();
+  };
+
+  // 📲 Avisar o servidor pelo WhatsApp (fila para a Natasha enviar).
+  const btnWa = document.getElementById('btn-avisar-wa');
+  if (btnWa) btnWa.onclick = async () => {
+    const sugestao = `Perícia Médica de Nova Iguaçu: sobre o processo ${p.numero_sei} (${p.especificacao || p.tipo || 'sua solicitação'}), `;
+    const r = await modal({ titulo: '📲 Avisar servidor pelo WhatsApp', okLabel: 'Enviar', corpo: `
+      <p class="muted">A mensagem entra na fila e a Natasha envia ao servidor.</p>
+      <div class="field"><label>WhatsApp (com DDD) — se já tivermos, deixe em branco</label><input name="telefone" placeholder="ex.: 5521999990000"></div>
+      <div class="field"><label>Mensagem</label><textarea name="texto" style="min-height:110px">${esc(sugestao)}</textarea></div>` });
+    if (!r || !r.texto?.trim()) return;
+    try { await api.post(`/api/processos/${p.id}/avisar-whatsapp`, r); toast('Mensagem na fila — a Natasha vai enviar.'); }
+    catch (e) { toast(e.message, true); }
   };
 
   // Arquivar / desarquivar

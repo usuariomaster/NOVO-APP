@@ -244,6 +244,22 @@ garantirColuna('afastamentos', 'bim_anterior', 'bim_anterior TEXT');
 garantirColuna('afastamentos', 'licenca_anterior_dias', 'licenca_anterior_dias INTEGER');
 // Número de prontuário interno da perícia (por servidor)
 garantirColuna('servidores', 'prontuario', 'prontuario TEXT');
+// WhatsApp do servidor (para a Natasha responder o resultado)
+garantirColuna('servidores', 'whatsapp', 'whatsapp TEXT');
+
+// Fila de saída para a Natasha (mensagens a enviar ao servidor no WhatsApp).
+// A Natasha consulta acao=outbox, envia, e confirma com acao=outbox_ack.
+db.exec(`
+CREATE TABLE IF NOT EXISTS wa_outbox (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  telefone     TEXT,
+  texto        TEXT NOT NULL,
+  servidor_id  INTEGER,
+  processo_id  INTEGER,
+  status       TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente','enviado','erro')),
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now')),
+  enviado_em   TEXT
+);`);
 
 // Servidor periciado (a pessoa dos processos) — vínculo com o processo
 garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');

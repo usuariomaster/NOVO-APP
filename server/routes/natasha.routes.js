@@ -28,7 +28,7 @@ router.use((req, res, next) => {
 const soDigitos = (s) => String(s || '').replace(/\D/g, '');
 
 // Encontra/atualiza o servidor por CPF (cria se não existir).
-function upsertServidor({ cpf, nome, data_nascimento, sexo, matriculas, lotacoes }) {
+function upsertServidor({ cpf, nome, data_nascimento, sexo, matriculas, lotacoes, telefone }) {
   const cpfLimpo = soDigitos(cpf);
   let s = cpfLimpo ? db.prepare(`SELECT * FROM servidores WHERE replace(replace(cpf,'.',''),'-','') = ?`).get(cpfLimpo) : null;
   if (!s && nome) s = db.prepare('SELECT * FROM servidores WHERE upper(nome) = upper(?)').get(String(nome).trim());
@@ -36,9 +36,9 @@ function upsertServidor({ cpf, nome, data_nascimento, sexo, matriculas, lotacoes
   const lot = Array.isArray(lotacoes) ? lotacoes.join(', ') : (lotacoes || '');
   if (!s) {
     const info = db.prepare(
-      `INSERT INTO servidores (nome, cpf, data_nascimento, sexo, matricula, secretaria) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO servidores (nome, cpf, data_nascimento, sexo, matricula, secretaria, whatsapp) VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(String(nome || '').trim() || 'Servidor (WhatsApp)', cpf || null, data_nascimento || null, sexo || null,
-      matr || null, lot || null);
+      matr || null, lot || null, telefone || null);
     s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(info.lastInsertRowid);
   } else {
     // completa apenas o que está vazio (não sobrescreve dado conferido)
@@ -46,9 +46,9 @@ function upsertServidor({ cpf, nome, data_nascimento, sexo, matriculas, lotacoes
       `UPDATE servidores SET
          nome = COALESCE(NULLIF(nome,''), ?), data_nascimento = COALESCE(data_nascimento, ?),
          sexo = COALESCE(sexo, ?), matricula = COALESCE(NULLIF(matricula,''), ?),
-         secretaria = COALESCE(NULLIF(secretaria,''), ?)
+         secretaria = COALESCE(NULLIF(secretaria,''), ?), whatsapp = COALESCE(NULLIF(whatsapp,''), ?)
        WHERE id = ?`
-    ).run(nome || null, data_nascimento || null, sexo || null, matr || null, lot || null, s.id);
+    ).run(nome || null, data_nascimento || null, sexo || null, matr || null, lot || null, telefone || null, s.id);
     s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(s.id);
   }
   return s;
@@ -68,7 +68,12 @@ router.get('/', (req, res) => {
     const af = db.prepare('SELECT tipo, cid, data_inicio, data_fim, dias, conclusao FROM afastamentos WHERE servidor_id = ? ORDER BY data_inicio DESC').all(s.id);
     return res.json({ ok: true, afastamentos: af });
   }
-  res.json({ ok: true, servico: 'SisPerícia · porta WhatsApp (Natasha)', acoes: ['servidor', 'afastamentos', 'pericia_intake', 'anexo'] });
+  // Fila de saída: mensagens que a Natasha deve ENVIAR ao servidor no WhatsApp.
+  if (acao === 'outbox') {
+    const msgs = db.prepare("SELECT id, telefone, texto, processo_id FROM wa_outbox WHERE status = 'pendente' ORDER BY id LIMIT 50").all();
+    return res.json({ ok: true, mensagens: msgs });
+  }
+  res.json({ ok: true, servico: 'SisPerícia · porta WhatsApp (Natasha)', acoes: ['servidor', 'afastamentos', 'pericia_intake', 'anexo', 'outbox', 'outbox_ack'] });
 });
 
 router.post('/', (req, res) => {
@@ -78,7 +83,7 @@ router.post('/', (req, res) => {
   // Entrada de perícia: cria/atualiza servidor e abre o caso na Caixa de entrada.
   if (acao === 'pericia_intake') {
     if (!b.cpf && !b.nome) return res.status(400).json({ ok: false, erro: 'informe cpf ou nome' });
-    const s = upsertServidor(b);
+    const s = upsertServidor({ ...b, telefone: b.telefone || b.from || b.whatsapp || b.phone });
     const ano = new Date().toISOString().slice(0, 4);
     const seq = db.prepare("SELECT COUNT(*) AS c FROM processos WHERE canal = 'whatsapp'").get().c + 1;
     const numero = `WA-${ano}-${String(seq).padStart(4, '0')}`;
@@ -109,6 +114,15 @@ router.post('/', (req, res) => {
   if (acao === 'servidor_upsert') {
     const s = upsertServidor(b);
     return res.json({ ok: true, servidor: { id: s.id, nome: s.nome, cpf: s.cpf } });
+  }
+
+  // Confirmação de envio da fila de saída (Natasha avisa que enviou).
+  if (acao === 'outbox_ack') {
+    const id = b.id || req.query.id;
+    if (!id) return res.status(400).json({ ok: false, erro: 'informe id' });
+    db.prepare("UPDATE wa_outbox SET status = ?, enviado_em = datetime('now') WHERE id = ?")
+      .run(b.status === 'erro' ? 'erro' : 'enviado', id);
+    return res.json({ ok: true });
   }
 
   res.status(400).json({ ok: false, erro: 'ação desconhecida' });
