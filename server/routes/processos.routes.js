@@ -19,13 +19,32 @@ const COLS_FICHA_SERV = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao
   'data_demissao', 'tipo_admissao', 'data_publicacao', 'num_portaria', 'data_concurso', 'data_posse',
   'data_exercicio', 'tipo_salario', 'regime_previdencia', 'carga_horaria', 'vinculo_empregaticio',
   'unidade_trabalho', 'classificacao_funcional', 'simbologia', 'cbo', 'cbo_mt', 'endereco', 'numero_ende',
-  'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email'];
+  'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email', 'observacoes'];
+
+// Registra afastamentos lidos por OCR (evita duplicar por servidor/início/tipo).
+function salvarAfastamentosOcr(servidorId, processoId, afastamentos) {
+  if (!servidorId || !Array.isArray(afastamentos) || !afastamentos.length) return 0;
+  const existe = db.prepare('SELECT id FROM afastamentos WHERE servidor_id = ? AND IFNULL(data_inicio,\'\') = ? AND IFNULL(tipo,\'\') = ?');
+  const ins = db.prepare(`INSERT INTO afastamentos (servidor_id, processo_id, tipo, data_inicio, data_fim, dias, descricao) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  let n = 0;
+  for (const a of afastamentos) {
+    if (existe.get(servidorId, a.data_inicio || '', a.tipo || '')) continue;
+    let dias = null;
+    if (a.data_inicio && a.data_fim) {
+      const di = new Date(a.data_inicio), df = new Date(a.data_fim);
+      if (!isNaN(di) && !isNaN(df)) dias = Math.max(0, Math.round((df - di) / 86400000) + 1);
+    }
+    ins.run(servidorId, processoId || null, a.tipo || null, a.data_inicio || null, a.data_fim || null, dias, a.descricao || null);
+    n++;
+  }
+  return n;
+}
 
 // Preenche a ficha do servidor com o que o OCR leu — só os campos vazios.
 // Prefere o PDF do processo (páginas reais, mais confiável que print);
 // se não houver, usa as imagens capturadas.
-async function ocrFichaParaServidor(servidorId, fichaImagens, numeroSei, pdfPath) {
-  if (!servidorId || !temChave()) return 0;
+async function ocrFichaParaServidor(servidorId, fichaImagens, numeroSei, pdfPath, processoId) {
+  if (!servidorId || !temChave()) return { temFicha: null, preenchidos: 0 };
   let arquivos = [];
   if (pdfPath && existsSync(pdfPath)) {
     try { arquivos = [{ base64: readFileSync(pdfPath).toString('base64'), mime: 'application/pdf' }]; } catch { /* */ }
@@ -34,7 +53,7 @@ async function ocrFichaParaServidor(servidorId, fichaImagens, numeroSei, pdfPath
     arquivos = fichaImagens.map((b) => ({ base64: b, mime: 'image/png' }));
   }
   if (!arquivos.length) return { temFicha: null, preenchidos: 0 };
-  const { campos, temFicha } = await extrairFichaDeArquivos(arquivos, { numeroSei });
+  const { campos, temFicha, afastamentos } = await extrairFichaDeArquivos(arquivos, { numeroSei });
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(servidorId);
   if (!s) return { temFicha, preenchidos: 0 };
   const cols = COLS_FICHA_SERV.filter((c) => campos[c] && (!s[c] || String(s[c]).trim() === ''));
@@ -42,7 +61,8 @@ async function ocrFichaParaServidor(servidorId, fichaImagens, numeroSei, pdfPath
     db.prepare(`UPDATE servidores SET ${cols.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
       .run(...cols.map((c) => campos[c]), s.id);
   }
-  return { temFicha, preenchidos: cols.length };
+  const afast = salvarAfastamentosOcr(servidorId, processoId, afastamentos);
+  return { temFicha, preenchidos: cols.length, afastamentos: afast };
 }
 
 // Monta a configuração do robô a partir da linha do banco (ou simulação).
@@ -343,9 +363,10 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     const pdfPath = r.pdfProcesso ? join(dirProc, r.pdfProcesso) : null;
     if (sid && (pdfPath || r.fichaImagens?.length)) {
       try {
-        const resF = await ocrFichaParaServidor(sid, r.fichaImagens, proc.numero_sei, pdfPath);
-        if (resF.temFicha === false) { db.prepare("UPDATE processos SET ficha_status = 'ausente' WHERE id = ?").run(proc.id); fichaMsg = ' ⚠️ sem ficha funcional'; }
-        else if (resF.temFicha === true) { db.prepare("UPDATE processos SET ficha_status = 'ok' WHERE id = ?").run(proc.id); fichaMsg = `, ficha lida (${resF.preenchidos} campo(s))`; }
+        const resF = await ocrFichaParaServidor(sid, r.fichaImagens, proc.numero_sei, pdfPath, proc.id);
+        const afMsg = resF.afastamentos ? `, ${resF.afastamentos} afastamento(s)` : '';
+        if (resF.temFicha === false) { db.prepare("UPDATE processos SET ficha_status = 'ausente' WHERE id = ?").run(proc.id); fichaMsg = ` ⚠️ sem ficha funcional${afMsg}`; }
+        else if (resF.temFicha === true) { db.prepare("UPDATE processos SET ficha_status = 'ok' WHERE id = ?").run(proc.id); fichaMsg = `, ficha lida (${resF.preenchidos} campo(s))${afMsg}`; }
       } catch { /* segue */ }
     }
   }
@@ -482,8 +503,9 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
               const sid = db.prepare('SELECT servidor_id FROM processos WHERE id = ?').get(item._proc.id)?.servidor_id;
               const pdfPath = r.pdfProcesso ? join(item.dir, r.pdfProcesso) : null;
               try {
-                const res = await ocrFichaParaServidor(sid, r.fichaImagens, item.numeroSei, pdfPath);
+                const res = await ocrFichaParaServidor(sid, r.fichaImagens, item.numeroSei, pdfPath, item._proc.id);
                 if (res.preenchidos) jobLote.fichas++;
+                if (res.afastamentos) jobLote.afastamentos = (jobLote.afastamentos || 0) + res.afastamentos;
                 if (res.temFicha === false) { jobLote.semFicha = (jobLote.semFicha || 0) + 1; db.prepare("UPDATE processos SET ficha_status = 'ausente' WHERE id = ?").run(item._proc.id); }
                 else if (res.temFicha === true) db.prepare("UPDATE processos SET ficha_status = 'ok' WHERE id = ?").run(item._proc.id);
               } catch { /* OCR falhou neste processo; segue */ }

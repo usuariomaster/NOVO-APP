@@ -437,7 +437,7 @@ async function buscarConteudoTodos() {
       if (!st.rodando) {
         clearInterval(timer);
         btn.disabled = false; btn.textContent = original;
-        const fichas = st.comFicha ? `, ${st.fichas || 0} ficha(s) por OCR${st.semFicha ? `, ${st.semFicha} sem ficha ⚠️` : ''}` : '';
+        const fichas = st.comFicha ? `, ${st.fichas || 0} ficha(s) por OCR${st.afastamentos ? `, ${st.afastamentos} afastamento(s)` : ''}${st.semFicha ? `, ${st.semFicha} sem ficha ⚠️` : ''}` : '';
         toast(`Concluído: ${st.novos} com nome${fichas}, ${st.erros} com erro, de ${st.total}.`);
         carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value, document.getElementById('filtro-tipo')?.value || '');
       }
@@ -705,7 +705,9 @@ async function renderServidorDetalhe(id) {
     btn.disabled = true; const orig = btn.textContent; btn.textContent = '⏳ Buscando no SEI…';
     try {
       const r = await api.post(`/api/servidores/${id}/buscar-ficha-sei`, {});
-      toast(`Ficha lida do SEI: ${r.preenchidos} campo(s) preenchidos (de ${r.lidos} lidos).`);
+      const af = r.afastamentos ? `, ${r.afastamentos} afastamento(s)` : '';
+      const semF = r.temFicha === false ? ' ⚠️ (ficha funcional não encontrada no processo)' : '';
+      toast(`Ficha lida do SEI: ${r.preenchidos} campo(s)${af}.${semF}`, r.temFicha === false);
       renderServidorDetalhe(id);
     } catch (e) {
       const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "🤖 Configuração da IA" (admin).' : e.message;

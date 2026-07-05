@@ -87,7 +87,7 @@ const CAMPOS_FICHA = [
   'tipo_salario', 'regime_previdencia', 'carga_horaria', 'vinculo_empregaticio',
   'secretaria', 'lotacao', 'setor', 'unidade_trabalho', 'classificacao_funcional',
   'simbologia', 'cbo', 'cbo_mt', 'endereco', 'numero_ende', 'bairro', 'municipio',
-  'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email',
+  'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email', 'observacoes',
 ];
 
 const SYSTEM_FICHA =
@@ -97,15 +97,21 @@ const SYSTEM_FICHA =
 const INSTRUCAO_FICHA =
   `Extraia os dados do servidor e devolva um JSON com estas chaves:\n` +
   CAMPOS_FICHA.join(', ') +
-  `\n\nO processo costuma ter 3 fontes: a FICHA FUNCIONAL (Dados Cadastrais do Funcionário / RH), ` +
-  `o HOLERITE (contracheque) e a IDENTIDADE (RG). Cruze as três: pegue CPF e RG/identidade do documento de ` +
-  `identidade; matrícula, cargo e lotação do holerite/ficha. ` +
+  `\n\nFONTES no processo (leia TODAS): a FICHA FUNCIONAL (Dados Cadastrais do Funcionário / RH), ` +
+  `o HOLERITE (contracheque), a IDENTIDADE (RG) e principalmente os DESPACHOS (texto corrido do RH/SEMAD). ` +
+  `Cruze tudo: CPF e RG da identidade; matrícula, cargo e lotação do holerite/ficha/despacho. ` +
+  `Os DESPACHOS geralmente trazem em texto: nome, cargo, lotação/secretaria, "matrícula nº ...", ` +
+  `"Portaria nº ...", data de publicação, data de exercício/posse — use-os para preencher os campos. ` +
   `Mapeamento: "Unidade de Trabalho"=unidade_trabalho, ` +
   `"Classificação Funcional"=classificacao_funcional (também pode preencher "cargo"/"funcao"), ` +
-  `"Secretaria"=secretaria (também lotacao), "Nº da Portaria"=num_portaria, ` +
-  `"Data da Posse"=data_posse, "Data do Exercício"=data_exercicio, "Identidade"=identidade. ` +
-  `Inclua também a chave booleana "tem_ficha_funcional": true se houver a ficha de Dados Cadastrais do ` +
-  `Funcionário no material, false se NÃO houver (mesmo que haja holerite/identidade).`;
+  `"Secretaria/lotado na"=secretaria (também lotacao), "Portaria nº"=num_portaria, ` +
+  `"Data da Posse"=data_posse, "exercício em"=data_exercicio, "Identidade"=identidade. ` +
+  `IMPORTANTE: a "matrícula" é um número curto do servidor (ex.: "76/707.347-1"), NUNCA o número do processo. ` +
+  `Preencha "observacoes" com um resumo em 1-3 frases da nomeação/portaria/lotação/exercício encontrados no despacho. ` +
+  `Inclua a chave booleana "tem_ficha_funcional": true se houver a ficha de Dados Cadastrais do Funcionário. ` +
+  `Inclua também a chave "afastamentos": uma lista (pode ser vazia) de licenças/afastamentos citados nos ` +
+  `despachos, cada item com { "tipo": "ex.: Licença para tratar de assuntos particulares", "data_inicio": "AAAA-MM-DD", ` +
+  `"data_fim": "AAAA-MM-DD", "descricao": "base legal, ex.: Portaria SEMAD nº 1.324/025" }. Não invente datas.`;
 
 // Um valor com cara de NÚMERO DE PROCESSO SEI (ex.: 20708202031.001315/2026-82).
 function pareceNumeroProcesso(v) {
@@ -150,12 +156,26 @@ function leuFicha(obj, campos) {
   return ['matricula', 'cargo', 'classificacao_funcional', 'data_admissao', 'data_posse', 'lotacao'].some((c) => campos[c]);
 }
 
+// Normaliza a lista de afastamentos lida (descarta itens sem datas).
+function lerAfastamentos(obj) {
+  const arr = Array.isArray(obj.afastamentos) ? obj.afastamentos : [];
+  const isData = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '').trim());
+  return arr
+    .map((a) => ({
+      tipo: String(a.tipo || '').trim() || null,
+      data_inicio: isData(a.data_inicio) ? a.data_inicio.trim() : null,
+      data_fim: isData(a.data_fim) ? a.data_fim.trim() : null,
+      descricao: String(a.descricao || '').trim() || null,
+    }))
+    .filter((a) => a.data_inicio || a.tipo);
+}
+
 // A partir de TEXTO colado. Retorna { campos, temFicha }.
 export async function extrairFichaFuncional(texto, ctx = {}) {
   const prompt = `${INSTRUCAO_FICHA}${avisoProcesso(ctx.numeroSei)}\n\nFICHA FUNCIONAL:\n"""${String(texto).slice(0, 12000)}"""`;
   const obj = await chamarClaude({ system: SYSTEM_FICHA, prompt, maxTokens: 2000, json: true });
   const campos = limparFicha(obj, ctx);
-  return { campos, temFicha: leuFicha(obj, campos) };
+  return { campos, temFicha: leuFicha(obj, campos), afastamentos: lerAfastamentos(obj) };
 }
 
 // A partir de ARQUIVO (imagem ou PDF) — OCR pela visão do Claude.
@@ -181,7 +201,7 @@ export async function extrairFichaDeArquivos(arquivos, ctx = {}) {
     `Se a imagem não for uma ficha funcional, devolva um JSON vazio {}. Devolva SOMENTE o JSON.` });
   const obj = await chamarClaude({ system: SYSTEM_FICHA, content: blocos, maxTokens: 2000, json: true });
   const campos = limparFicha(obj, ctx);
-  return { campos, temFicha: leuFicha(obj, campos) };
+  return { campos, temFicha: leuFicha(obj, campos), afastamentos: lerAfastamentos(obj) };
 }
 
 // ---- Gera PPP/LTCAT/PCMSO a partir do CBO e das atividades ----

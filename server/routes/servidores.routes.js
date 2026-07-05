@@ -129,9 +129,9 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     }
   }
 
-  let campos, temFicha;
+  let campos, temFicha, afastamentos;
   try {
-    ({ campos, temFicha } = await extrairFichaDeArquivos(arquivos, { numeroSei: proc.numero_sei }));
+    ({ campos, temFicha, afastamentos } = await extrairFichaDeArquivos(arquivos, { numeroSei: proc.numero_sei }));
   } catch (e) {
     const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "Configuração da IA".' : e.message;
     return res.status(502).json({ erro: `OCR falhou: ${msg}` });
@@ -148,7 +148,18 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     db.prepare(`UPDATE servidores SET ${aGravar.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
       .run(...aGravar.map((c) => campos[c]), s.id);
   }
-  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem, temFicha });
+  // Registra afastamentos/licenças citados nos despachos (sem duplicar).
+  let nAfast = 0;
+  const existeAf = db.prepare("SELECT id FROM afastamentos WHERE servidor_id = ? AND IFNULL(data_inicio,'') = ? AND IFNULL(tipo,'') = ?");
+  for (const a of (afastamentos || [])) {
+    if (existeAf.get(s.id, a.data_inicio || '', a.tipo || '')) continue;
+    let dias = null;
+    if (a.data_inicio && a.data_fim) { const di = new Date(a.data_inicio), df = new Date(a.data_fim); if (!isNaN(di) && !isNaN(df)) dias = Math.max(0, Math.round((df - di) / 86400000) + 1); }
+    db.prepare('INSERT INTO afastamentos (servidor_id, processo_id, tipo, data_inicio, data_fim, dias, descricao) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(s.id, proc.id, a.tipo || null, a.data_inicio || null, a.data_fim || null, dias, a.descricao || null);
+    nAfast++;
+  }
+  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem, temFicha, afastamentos: nAfast });
 });
 
 // ---- Afastamentos (com CID) ----
