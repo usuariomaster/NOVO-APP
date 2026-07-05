@@ -93,6 +93,7 @@ const rotas = {
   '#mensageiro': renderMensageiro,
   '#usuarios': renderUsuarios,
   '#sei': renderConfigSei,
+  '#ia': renderConfigIa,
 };
 
 async function navegar() {
@@ -134,6 +135,7 @@ function shell(conteudo) {
     isOper ? `<a href="#mensageiro">🚚 Mensageiro</a>` : '',
     isAdmin ? `<a href="#usuarios">👥 Usuários</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
+    isAdmin ? `<a href="#ia">🤖 Configuração da IA</a>` : '',
   ].join('');
 
   appEl().innerHTML = `
@@ -486,12 +488,36 @@ async function extrairDoSei() {
 // ============================================================
 // Servidores (pessoas periciadas) — cadastro + dashboard
 // ============================================================
-const CAMPOS_SERV = [
-  ['nome', 'Nome'], ['cpf', 'CPF'], ['matricula', 'Matrícula'], ['cargo', 'Cargo'],
-  ['funcao', 'Função'], ['lotacao', 'Lotação'], ['secretaria', 'Secretaria'], ['setor', 'Setor'],
-  ['data_nascimento', 'Nascimento'], ['sexo', 'Sexo'], ['data_admissao', 'Admissão'], ['vinculo', 'Vínculo'],
-  ['atividades', 'Atividades (PPP)'], ['agentes_nocivos', 'Agentes nocivos (PPP)'], ['observacoes', 'Observações'],
+// Ficha funcional agrupada (espelha a tela de RH da Prefeitura).
+const GRUPOS_SERV = [
+  ['Identificação', [
+    ['nome', 'Nome'], ['cpf', 'CPF'], ['matricula', 'Matrícula'], ['data_nascimento', 'Nascimento'],
+    ['sexo', 'Sexo'], ['estado_civil', 'Estado civil'], ['nacionalidade', 'Nacionalidade'],
+    ['naturalidade', 'Naturalidade'], ['uf_naturalidade', 'UF nat.'], ['grau_instrucao', 'Grau de instrução'],
+    ['pai', 'Pai'], ['mae', 'Mãe'],
+  ]],
+  ['Documentação', [
+    ['identidade', 'Identidade (RG)'], ['identidade_emissao', 'Emissão RG'], ['identidade_orgao', 'Órgão emissor'],
+    ['titulo_eleitor', 'Título de eleitor'], ['zona', 'Zona'], ['secao', 'Seção'],
+    ['ctps', 'CTPS'], ['ctps_serie', 'Série CTPS'], ['ctps_uf', 'UF CTPS'], ['nit', 'NIT'], ['pis_pasep', 'PIS/PASEP'],
+  ]],
+  ['Dados funcionais', [
+    ['cargo', 'Cargo'], ['classificacao_funcional', 'Classificação funcional'], ['funcao', 'Função'],
+    ['cbo', 'CBO'], ['cbo_mt', 'CBO MT'], ['simbologia', 'Simbologia'],
+    ['secretaria', 'Secretaria'], ['lotacao', 'Lotação'], ['setor', 'Setor'], ['unidade_trabalho', 'Unidade de trabalho'],
+    ['situacao', 'Situação'], ['vinculo', 'Vínculo'], ['vinculo_empregaticio', 'Vínculo empregatício'],
+    ['regime_previdencia', 'Regime previdência'], ['tipo_admissao', 'Tipo de admissão'],
+    ['data_admissao', 'Admissão'], ['data_posse', 'Posse'], ['data_exercicio', 'Exercício'],
+    ['data_concurso', 'Concurso'], ['num_portaria', 'Nº da Portaria'], ['data_publicacao', 'Publicação'],
+    ['tipo_salario', 'Tipo de salário'], ['carga_horaria', 'Carga horária'], ['data_demissao', 'Demissão'],
+  ]],
+  ['Endereço / contato', [
+    ['endereco', 'Endereço'], ['numero_ende', 'Número'], ['complemento', 'Complemento'], ['bairro', 'Bairro'],
+    ['municipio', 'Município'], ['uf_ende', 'UF'], ['cep', 'CEP'], ['telefone', 'Telefone'],
+    ['celular', 'Celular'], ['email', 'E-mail'],
+  ]],
 ];
+const CAMPOS_TEXTAREA = new Set(['pai', 'mae', 'observacoes', 'atividades', 'agentes_nocivos', 'ppp_atividades', 'ltcat', 'pcmso']);
 
 async function renderServidores() {
   shell('<div class="empty">Carregando…</div>');
@@ -536,11 +562,22 @@ async function renderServidorDetalhe(id) {
   try { s = await api.get('/api/servidores/' + id); }
   catch (e) { setMain(`<div class="card"><div class="empty">${esc(e.message)}</div></div>`); return; }
 
-  const ficha = CAMPOS_SERV.map(([k, lbl]) =>
-    `<div class="field" style="margin-bottom:10px"><label>${lbl}</label>${
-      k === 'atividades' || k === 'agentes_nocivos' || k === 'observacoes'
-        ? `<textarea data-campo="${k}" style="min-height:60px">${esc(s[k] || '')}</textarea>`
-        : `<input data-campo="${k}" value="${esc(s[k] || '')}">`}</div>`).join('');
+  const campoHtml = (k, lbl) => `<div class="field" style="margin-bottom:10px"><label>${lbl}</label>${
+    CAMPOS_TEXTAREA.has(k)
+      ? `<textarea data-campo="${k}" style="min-height:56px">${esc(s[k] || '')}</textarea>`
+      : `<input data-campo="${k}" value="${esc(s[k] || '')}">`}</div>`;
+  const ficha = GRUPOS_SERV.map(([titulo, campos]) =>
+    `<div class="ficha-grupo"><div class="muted" style="font-weight:600;margin:14px 0 6px;border-bottom:1px solid var(--border);padding-bottom:4px">${titulo}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px">${campos.map(([k, lbl]) => campoHtml(k, lbl)).join('')}</div></div>`
+  ).join('');
+
+  // Seção Segurança do Trabalho / PPP (campos livres + gerados por IA)
+  const segTrab = ['atividades', 'agentes_nocivos', 'ppp_atividades', 'ltcat', 'pcmso', 'observacoes'].map((k) => {
+    const rot = { atividades: 'Atividades exercidas', agentes_nocivos: 'Agentes nocivos', ppp_atividades: 'PPP — atividades (IA)', ltcat: 'LTCAT — condições ambientais (IA)', pcmso: 'PCMSO — controle médico (IA)', observacoes: 'Observações (nomeação/portaria/posse)' }[k];
+    return campoHtml(k, rot);
+  }).join('');
+  const iaAviso = s.ia_atualizado_em ? `<span class="muted" style="font-size:12px">gerado por IA em ${esc(s.ia_atualizado_em)}</span>` : '';
+  const fichaAviso = s.ficha_atualizada_em ? `<span class="muted" style="font-size:12px">ficha atualizada em ${esc(s.ficha_atualizada_em)}</span>` : '';
 
   const afast = s.afastamentos.length ? `<table>
     <thead><tr><th>Início</th><th>Fim</th><th>Dias</th><th>CID</th><th>Tipo</th><th></th></tr></thead>
@@ -571,8 +608,16 @@ async function renderServidorDetalhe(id) {
     <a class="btn" href="/api/servidores/${id}/ppp" target="_blank" rel="noopener">🖨 Ficha / PPP</a></div>
     <div class="detail-grid">
       <div>
-        <div class="card"><div class="card-h">Ficha funcional <button class="btn sm" id="s-salvar">Salvar</button></div>
+        <div class="card"><div class="card-h">Ficha funcional
+          <span style="display:flex;gap:6px;align-items:center">${fichaAviso}
+            <button class="btn secondary sm" id="s-ia-ficha">🤖 Preencher com IA</button>
+            <button class="btn sm" id="s-salvar">Salvar</button></span></div>
           <div class="card-b">${ficha}</div></div>
+        <div class="card"><div class="card-h">Segurança do Trabalho / PPP
+          <span style="display:flex;gap:6px;align-items:center">${iaAviso}
+            <button class="btn secondary sm" id="s-ia-cbo">🤖 Gerar por CBO</button>
+            <button class="btn sm" id="s-salvar-2">Salvar</button></span></div>
+          <div class="card-b">${segTrab}</div></div>
         <div class="card"><div class="card-h">Afastamentos (CID) <button class="btn sm" id="s-add-af">＋ Afastamento</button></div>
           <div class="card-b">${afast}</div></div>
       </div>
@@ -591,11 +636,71 @@ async function renderServidorDetalhe(id) {
   `);
 
   document.querySelectorAll('#main-content tr[data-proc]').forEach((tr) => { tr.onclick = () => (location.hash = `#processo/${tr.dataset.proc}`); });
-  document.getElementById('s-salvar').onclick = async () => {
+  const salvarFicha = async () => {
     const corpo = {};
     document.querySelectorAll('[data-campo]').forEach((el) => (corpo[el.dataset.campo] = el.value));
     try { await api.put('/api/servidores/' + id, corpo); toast('Ficha salva'); }
     catch (e) { toast(e.message, true); }
+  };
+  document.getElementById('s-salvar').onclick = salvarFicha;
+  document.getElementById('s-salvar-2').onclick = salvarFicha;
+
+  // 🤖 Preencher com IA: cola o texto da ficha funcional e a IA extrai os campos.
+  document.getElementById('s-ia-ficha').onclick = async () => {
+    const r = await modal({
+      titulo: '🤖 Preencher ficha com IA',
+      okLabel: 'Extrair',
+      corpo: `<p class="muted">Cole o texto da ficha funcional (do sistema de RH ou do documento do SEI).
+        A IA vai preencher os campos abaixo — <b>confira e salve</b>.</p>
+        <div class="field"><label>Texto da ficha</label>
+        <textarea name="texto" style="min-height:200px" placeholder="Cole aqui os DADOS CADASTRAIS DO FUNCIONÁRIO…"></textarea></div>`,
+    });
+    if (!r || !r.texto || r.texto.trim().length < 20) return;
+    toast('Lendo a ficha com IA…');
+    try {
+      const { campos } = await api.post('/api/ia/extrair-ficha', { texto: r.texto });
+      let n = 0;
+      for (const [k, v] of Object.entries(campos || {})) {
+        const el = document.querySelector(`[data-campo="${k}"]`);
+        if (el && v) { el.value = v; n++; }
+      }
+      if (!n) return toast('A IA não encontrou campos reconhecíveis.', true);
+      // Compõe as observações (nomeação/portaria/lotação/posse) se estiver vazio.
+      const obsEl = document.querySelector('[data-campo="observacoes"]');
+      if (obsEl && !obsEl.value.trim()) {
+        const g = (k) => campos[k] || document.querySelector(`[data-campo="${k}"]`)?.value || '';
+        const partes = [];
+        if (g('num_portaria')) partes.push(`Nomeado(a) pela Portaria nº ${g('num_portaria')}${g('data_publicacao') ? ' (publicada em ' + g('data_publicacao') + ')' : ''}`);
+        if (g('secretaria') || g('lotacao')) partes.push(`Lotação: ${[g('secretaria'), g('lotacao')].filter(Boolean).join(' — ')}`);
+        if (g('data_posse')) partes.push(`Posse em ${g('data_posse')}`);
+        if (g('data_exercicio')) partes.push(`Exercício desde ${g('data_exercicio')}`);
+        if (partes.length) obsEl.value = partes.join('. ') + '.';
+      }
+      await salvarFicha();
+      toast(`${n} campo(s) preenchidos e salvos. Confira os dados.`);
+    } catch (e) {
+      const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em Configuração da IA (admin).' : e.message;
+      toast(msg, true);
+    }
+  };
+
+  // 🤖 Gerar por CBO: preenche PPP/LTCAT/PCMSO a partir do CBO/cargo.
+  document.getElementById('s-ia-cbo').onclick = async () => {
+    const cboAtual = document.querySelector('[data-campo="cbo"]')?.value || s.cbo || '';
+    const cargoAtual = document.querySelector('[data-campo="cargo"]')?.value || s.cargo || '';
+    if (!cboAtual && !cargoAtual) return toast('Preencha o CBO ou o cargo primeiro.', true);
+    if (!confirm(`Gerar PPP / LTCAT / PCMSO com IA para o CBO "${cboAtual || '(sem CBO)'}" / cargo "${cargoAtual}"?`)) return;
+    toast('Gerando com IA… (pode levar alguns segundos)');
+    try {
+      const r = await api.post(`/api/ia/servidor/${id}/cbo`, { cbo: cboAtual });
+      const set = (k, v) => { const el = document.querySelector(`[data-campo="${k}"]`); if (el && v) el.value = v; };
+      set('ppp_atividades', r.ppp_atividades); set('ltcat', r.ltcat); set('pcmso', r.pcmso);
+      if (r.agentes_nocivos && !document.querySelector('[data-campo="agentes_nocivos"]').value) set('agentes_nocivos', r.agentes_nocivos);
+      toast('PPP / LTCAT / PCMSO gerados e salvos.');
+    } catch (e) {
+      const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em Configuração da IA (admin).' : e.message;
+      toast(msg, true);
+    }
   };
   document.getElementById('s-add-af').onclick = async () => {
     const r = await modal({ titulo: 'Registrar afastamento', okLabel: 'Salvar', corpo: `
@@ -1321,6 +1426,52 @@ async function abrirFicha(id) {
 // ============================================================
 // Configuração do SEI (admin)
 // ============================================================
+// Configuração da IA — "cofre de tokens": guarda a chave da Anthropic
+// criptografada e permite testar a conexão.
+async function renderConfigIa() {
+  shell('<div class="empty">Carregando…</div>');
+  const st = await api.get('/api/ia/status').catch(() => ({ configurado: false, modelo: '' }));
+  setMain(`
+    <div class="page-head"><div>
+      <h2>🤖 Configuração da IA</h2>
+      <div class="desc">Cofre de tokens — a chave da Anthropic fica guardada criptografada no servidor e nunca aparece de volta na tela.</div>
+    </div></div>
+    <div class="card"><div class="card-b">
+      <p>Status: ${st.configurado
+        ? '<b style="color:var(--ok,green)">✅ Chave configurada</b>'
+        : '<b style="color:var(--danger,#c00)">⚠️ Sem chave</b>'} ${st.modelo ? `<span class="muted">• modelo: ${esc(st.modelo)}</span>` : ''}</p>
+      <div class="field"><label>Chave da API (Anthropic)</label>
+        <input id="ia-chave" type="password" placeholder="${st.configurado ? '•••••••• (deixe em branco para manter)' : 'sk-ant-...'}" autocomplete="off"></div>
+      <div class="field"><label>Modelo</label>
+        <input id="ia-modelo" value="${esc(st.modelo || 'claude-sonnet-4-5-20250929')}"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" id="ia-salvar">Salvar</button>
+        <button class="btn secondary" id="ia-testar">Testar conexão</button>
+      </div>
+      <div id="ia-msg" class="muted" style="margin-top:10px"></div>
+      <p class="muted" style="margin-top:14px;font-size:13px">A IA é usada para: (1) ler a ficha funcional colada em texto e preencher o cadastro do servidor;
+      (2) gerar, a partir do CBO, as atividades do PPP e os elementos de LTCAT e PCMSO. A chave pode ser guardada aqui ou
+      no arquivo <code>.env</code> do servidor (variável de ambiente) — o que preferir.</p>
+    </div></div>
+  `);
+  document.getElementById('ia-salvar').onclick = async () => {
+    const chave = document.getElementById('ia-chave').value.trim();
+    const modelo = document.getElementById('ia-modelo').value.trim();
+    try {
+      await api.post('/api/ia/config', { chave: chave || undefined, modelo });
+      toast('Configuração da IA salva'); renderConfigIa();
+    } catch (e) { toast(e.message, true); }
+  };
+  document.getElementById('ia-testar').onclick = async () => {
+    const msg = document.getElementById('ia-msg');
+    msg.textContent = 'Testando…';
+    try {
+      const r = await api.post('/api/ia/testar');
+      msg.innerHTML = r.ok ? '✅ Conexão OK — a IA respondeu.' : `Resposta inesperada: ${esc(r.resposta || '')}`;
+    } catch (e) { msg.innerHTML = `<span style="color:var(--danger,#c00)">❌ ${esc(e.message)}</span>`; }
+  };
+}
+
 async function renderConfigSei() {
   shell('<div class="empty">Carregando…</div>');
   // À prova de falha: se algo não carregar, usa padrões em vez de travar.

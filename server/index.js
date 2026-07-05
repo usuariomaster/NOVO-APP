@@ -16,6 +16,7 @@ import despachosRoutes from './routes/despachos.routes.js';
 import remessasRoutes from './routes/remessas.routes.js';
 import padroesRoutes from './routes/padroes.routes.js';
 import servidoresRoutes from './routes/servidores.routes.js';
+import iaRoutes from './routes/ia.routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,7 @@ app.use('/api/despachos', despachosRoutes);
 app.use('/api/remessas', remessasRoutes);
 app.use('/api/padroes', padroesRoutes);
 app.use('/api/servidores', servidoresRoutes);
+app.use('/api/ia', iaRoutes);
 
 // Front-end estático
 app.use(express.static(join(__dirname, '..', 'public')));

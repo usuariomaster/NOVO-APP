@@ -14,7 +14,17 @@ router.use(exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_ad
 const DIR_PRONT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'prontuarios');
 
 const CAMPOS = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao', 'secretaria', 'setor',
-  'data_nascimento', 'sexo', 'data_admissao', 'vinculo', 'atividades', 'agentes_nocivos', 'observacoes'];
+  'data_nascimento', 'sexo', 'data_admissao', 'vinculo', 'atividades', 'agentes_nocivos', 'observacoes',
+  // Ficha funcional completa (RH)
+  'pai', 'mae', 'grau_instrucao', 'naturalidade', 'uf_naturalidade', 'nacionalidade', 'estado_civil',
+  'identidade', 'identidade_emissao', 'identidade_orgao', 'titulo_eleitor', 'zona', 'secao',
+  'ctps', 'ctps_serie', 'ctps_uf', 'nit', 'pis_pasep',
+  'situacao', 'data_demissao', 'tipo_admissao', 'data_publicacao', 'num_portaria', 'data_concurso',
+  'data_posse', 'data_exercicio', 'tipo_salario', 'regime_previdencia', 'carga_horaria', 'vinculo_empregaticio',
+  'unidade_trabalho', 'classificacao_funcional', 'simbologia', 'cbo', 'cbo_mt',
+  'endereco', 'numero_ende', 'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email',
+  // Gerados por IA
+  'ppp_atividades', 'ltcat', 'pcmso'];
 
 // Lista de servidores (com contagem de processos e afastamentos).
 router.get('/', (req, res) => {
@@ -60,7 +70,10 @@ router.put('/:id', (req, res) => {
   const b = req.body || {};
   const cols = CAMPOS.filter((c) => b[c] !== undefined);
   if (cols.length) {
-    db.prepare(`UPDATE servidores SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`)
+    // Marca quando a ficha funcional foi atualizada (para o alerta de revisão).
+    const mexeuFicha = cols.some((c) => !['ppp_atividades', 'ltcat', 'pcmso', 'observacoes'].includes(c));
+    const extra = mexeuFicha ? ", ficha_atualizada_em = datetime('now')" : '';
+    db.prepare(`UPDATE servidores SET ${cols.map((c) => `${c} = ?`).join(', ')}${extra} WHERE id = ?`)
       .run(...cols.map((c) => b[c] || null), s.id);
   }
   res.json({ ok: true });

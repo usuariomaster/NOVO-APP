@@ -262,6 +262,41 @@ CREATE INDEX IF NOT EXISTS idx_afast_serv ON afastamentos(servidor_id);
 CREATE INDEX IF NOT EXISTS idx_proc_serv ON processos(servidor_id);
 `);
 
+// --- Ficha funcional completa do servidor (RH da Prefeitura) ---
+// Todos os campos da tela "Dados Cadastrais do Funcionário" para
+// alimentar o cadastro e servir de base ao PPP/LTCAT/PCMSO.
+for (const [nome, ddl] of [
+  // Dados pessoais
+  ['pai', 'pai TEXT'], ['mae', 'mae TEXT'], ['grau_instrucao', 'grau_instrucao TEXT'],
+  ['naturalidade', 'naturalidade TEXT'], ['uf_naturalidade', 'uf_naturalidade TEXT'],
+  ['nacionalidade', 'nacionalidade TEXT'], ['estado_civil', 'estado_civil TEXT'],
+  // Documentação
+  ['identidade', 'identidade TEXT'], ['identidade_emissao', 'identidade_emissao TEXT'],
+  ['identidade_orgao', 'identidade_orgao TEXT'], ['titulo_eleitor', 'titulo_eleitor TEXT'],
+  ['zona', 'zona TEXT'], ['secao', 'secao TEXT'], ['ctps', 'ctps TEXT'],
+  ['ctps_serie', 'ctps_serie TEXT'], ['ctps_uf', 'ctps_uf TEXT'],
+  ['nit', 'nit TEXT'], ['pis_pasep', 'pis_pasep TEXT'],
+  // Dados funcionais
+  ['situacao', 'situacao TEXT'], ['data_demissao', 'data_demissao TEXT'],
+  ['tipo_admissao', 'tipo_admissao TEXT'], ['data_publicacao', 'data_publicacao TEXT'],
+  ['num_portaria', 'num_portaria TEXT'], ['data_concurso', 'data_concurso TEXT'],
+  ['data_posse', 'data_posse TEXT'], ['data_exercicio', 'data_exercicio TEXT'],
+  ['tipo_salario', 'tipo_salario TEXT'], ['regime_previdencia', 'regime_previdencia TEXT'],
+  ['carga_horaria', 'carga_horaria TEXT'], ['vinculo_empregaticio', 'vinculo_empregaticio TEXT'],
+  ['unidade_trabalho', 'unidade_trabalho TEXT'], ['classificacao_funcional', 'classificacao_funcional TEXT'],
+  ['simbologia', 'simbologia TEXT'], ['cbo', 'cbo TEXT'], ['cbo_mt', 'cbo_mt TEXT'],
+  // Endereço/contato
+  ['endereco', 'endereco TEXT'], ['numero_ende', 'numero_ende TEXT'], ['bairro', 'bairro TEXT'],
+  ['municipio', 'municipio TEXT'], ['uf_ende', 'uf_ende TEXT'], ['cep', 'cep TEXT'],
+  ['complemento', 'complemento TEXT'], ['telefone', 'telefone TEXT'], ['celular', 'celular TEXT'],
+  ['email', 'email TEXT'],
+  // Gerados por IA a partir do CBO (base para PPP/LTCAT/PCMSO)
+  ['ppp_atividades', 'ppp_atividades TEXT'], ['ltcat', 'ltcat TEXT'], ['pcmso', 'pcmso TEXT'],
+  ['ia_atualizado_em', 'ia_atualizado_em TEXT'], ['ficha_atualizada_em', 'ficha_atualizada_em TEXT'],
+]) {
+  garantirColuna('servidores', nome, ddl);
+}
+
 // Padrões pessoais de despacho do perito
 db.exec(`
 CREATE TABLE IF NOT EXISTS padroes (
