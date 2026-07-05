@@ -400,7 +400,30 @@ async function listarUnidades(page, nomeAtual) {
       } catch { /* ignora */ }
     }
   }
-  if (!abriu) return { unidades: [], debug: 'Não encontrei o seletor de unidade (botão "Alterar Unidade" no topo do SEI).' };
+  if (!abriu) {
+    // Não achei o botão de troca — dumpa o topo/cabeçalho de cada frame para
+    // eu descobrir qual é o elemento certo de "Alterar Unidade".
+    let dump = 'Não encontrei o botão "Alterar Unidade". Elementos candidatos no topo do SEI:\n\n';
+    for (const f of page.frames()) {
+      try {
+        const els = await f.$$eval('a, span, div, td, input, button', (nodes) =>
+          nodes.map((n) => ({
+            tag: n.tagName.toLowerCase(),
+            id: n.id || '',
+            t: (n.textContent || n.getAttribute?.('value') || '').trim().slice(0, 60),
+            h: (n.getAttribute?.('href') || '').slice(0, 90),
+            o: (n.getAttribute?.('onclick') || '').slice(0, 90),
+            ti: (n.getAttribute?.('title') || '').slice(0, 60),
+          })).filter((x) => /unidad|SEMUS|PERÍCIA|PERICIA|infraUnidade|lnkInfra/i.test(`${x.id} ${x.t} ${x.h} ${x.o} ${x.ti}`))
+        );
+        if (els.length) {
+          dump += `--- ${f.url().slice(0, 70)} ---\n` +
+            els.slice(0, 25).map((e) => `<${e.tag}${e.id ? ' id=' + e.id : ''}> "${e.t}" title="${e.ti}" ${e.h || e.o}`).join('\n') + '\n\n';
+        }
+      } catch { /* ignora */ }
+    }
+    return { unidades: [], debug: dump.slice(0, 6000) };
+  }
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(1200);
 

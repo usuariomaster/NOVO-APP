@@ -655,8 +655,9 @@ async function renderServidorDetalhe(id) {
     <div class="detail-grid">
       <div>
         <div class="card"><div class="card-h">Ficha funcional
-          <span style="display:flex;gap:6px;align-items:center">${fichaAviso}
-            <button class="btn secondary sm" id="s-ia-ficha">🤖 Preencher com IA</button>
+          <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${fichaAviso}
+            <button class="btn secondary sm" id="s-ia-sei" title="Abre o processo no SEI, tira print da ficha e preenche sozinho">🤖 Buscar ficha no SEI</button>
+            <button class="btn secondary sm" id="s-ia-ficha">🤖 Preencher (colar/foto)</button>
             <button class="btn sm" id="s-salvar">Salvar</button></span></div>
           <div class="card-b">${ficha}</div></div>
         <div class="card"><div class="card-h">Segurança do Trabalho / PPP
@@ -690,6 +691,22 @@ async function renderServidorDetalhe(id) {
   };
   document.getElementById('s-salvar').onclick = salvarFicha;
   document.getElementById('s-salvar-2').onclick = salvarFicha;
+
+  // 🤖 Buscar ficha no SEI: abre o processo, tira print da ficha e OCR — sozinho.
+  document.getElementById('s-ia-sei').onclick = async () => {
+    const btn = document.getElementById('s-ia-sei');
+    if (!confirm('Abrir o processo deste servidor no SEI, capturar a ficha funcional e preencher automaticamente?\n\nPode levar alguns segundos.')) return;
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = '⏳ Buscando no SEI…';
+    try {
+      const r = await api.post(`/api/servidores/${id}/buscar-ficha-sei`, {});
+      toast(`Ficha lida do SEI: ${r.preenchidos} campo(s) preenchidos (de ${r.lidos} lidos).`);
+      renderServidorDetalhe(id);
+    } catch (e) {
+      const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "🤖 Configuração da IA" (admin).' : e.message;
+      toast(msg, true);
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
 
   // 🤖 Preencher com IA: OCR de foto/PDF OU texto colado -> preenche a ficha.
   document.getElementById('s-ia-ficha').onclick = async () => {

@@ -276,6 +276,82 @@ async function coletarAmostra(page) {
   return partes.join('\n\n').slice(0, 8000);
 }
 
+// ------------------------------------------------------------
+// Captura automática da FICHA FUNCIONAL do processo (para OCR pela IA).
+// Abre o processo, localiza na árvore os documentos com cara de ficha
+// (Dados Cadastrais / Recursos Humanos / Ficha Funcional) e tira um
+// print do conteúdo de cada um. Devolve as imagens em base64 (PNG).
+// ------------------------------------------------------------
+const FICHA_KW = /ficha|cadastr|funcional|recursos\s*humanos|dados\s*cadastr|assentament|\bRH\b|situa[çc][aã]o\s*funcional/i;
+
+async function screenshotConteudo(page) {
+  const frame = acharConteudo(page);
+  try {
+    if (frame) {
+      const buf = await frame.locator('body').screenshot({ type: 'png', timeout: 8000 });
+      return buf.toString('base64');
+    }
+  } catch { /* tenta a página inteira */ }
+  try {
+    const buf = await page.screenshot({ type: 'png', fullPage: true });
+    return buf.toString('base64');
+  } catch { return null; }
+}
+
+async function capturarFichaDoProcesso(page, baseUrl, numeroSei) {
+  await abrirProcesso(page, baseUrl, numeroSei);
+  const arvore = await acharArvore(page);
+  if (!arvore) return { imagens: [], motivo: 'Árvore de documentos não encontrada.' };
+
+  let anchors = [];
+  try {
+    anchors = await arvore.$$eval('a', (els) =>
+      els.map((el, i) => ({ i, t: (el.textContent || '').trim() })).filter((x) => /\d{6,9}/.test(x.t))
+    );
+  } catch { /* segue */ }
+  if (!anchors.length) return { imagens: [], motivo: 'Nenhum documento na árvore.' };
+
+  // Prioriza documentos com cara de ficha; se nenhum, pega os 2 primeiros.
+  const comKw = anchors.filter((a) => FICHA_KW.test(a.t));
+  const alvos = (comKw.length ? comKw : anchors).slice(0, comKw.length ? 4 : 2);
+
+  const imagens = [];
+  const rotulos = [];
+  for (const a of alvos) {
+    try {
+      const link = arvore.locator('a').nth(a.i);
+      if (!(await link.count())) continue;
+      await link.click({ timeout: 10000 });
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(1200);
+      const img = await screenshotConteudo(page);
+      if (img) { imagens.push(img); rotulos.push(a.t); }
+    } catch { /* tenta o próximo */ }
+  }
+  return { imagens, rotulos, motivo: imagens.length ? null : 'Não consegui capturar o conteúdo dos documentos.' };
+}
+
+// API: abre o processo e devolve as imagens (PNG base64) da ficha para OCR.
+export async function capturarFichaNoSei(cfg, dados, mock) {
+  if (mock) {
+    await new Promise((r) => setTimeout(r, 200));
+    return { modo: 'simulacao', imagens: [], rotulos: [], motivo: 'Modo simulação: sem SEI real.' };
+  }
+  const browser = await abrirNavegador();
+  let page = null;
+  try {
+    const auth = await autenticar(browser, cfg);
+    page = auth.page;
+    const r = await capturarFichaDoProcesso(page, auth.baseUrl, dados.numeroSei);
+    return { modo: 'sei', ...r };
+  } catch (e) {
+    if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-ficha-erro');
+    throw e;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
 // dados = { processoId, numeroSei, dir }  (dir = pasta para salvar os PDFs)
 export async function detalharProcessoNoSei(cfg, dados, mock) {
   if (mock) {

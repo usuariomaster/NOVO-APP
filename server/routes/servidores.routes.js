@@ -4,8 +4,11 @@ import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import db from '../db.js';
+import db, { ehSimulacao } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
+import { descriptografar } from '../sei/crypto.js';
+import { capturarFichaNoSei } from '../sei/detail.js';
+import { extrairFichaDeArquivos } from '../services/ia.js';
 
 const router = Router();
 router.use(exigirLogin);
@@ -82,6 +85,55 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', exigirPapel('operador', 'admin', 'admin_master'), (req, res) => {
   db.prepare('DELETE FROM servidores WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// 🤖 Busca a ficha funcional AUTOMÁTICA no SEI: abre o processo do servidor,
+// tira print dos documentos com cara de ficha, roda OCR (IA) e preenche.
+router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_admin'), async (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
+
+  // Escolhe um processo do servidor no SEI (não físico, com número).
+  const proc = db.prepare(
+    `SELECT * FROM processos WHERE servidor_id = ? AND fisico = 0 AND numero_sei IS NOT NULL
+     ${req.body?.processo_id ? 'AND id = ?' : ''} ORDER BY id DESC LIMIT 1`
+  ).get(...(req.body?.processo_id ? [s.id, req.body.processo_id] : [s.id]));
+  if (!proc) return res.status(400).json({ erro: 'Este servidor não tem processo do SEI para buscar a ficha.' });
+
+  const mock = ehSimulacao();
+  const cfgRow = db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
+  if (!cfgRow && !mock) return res.status(400).json({ erro: 'Cadastre a configuração do SEI primeiro.' });
+  const cfg = cfgRow ? {
+    base_url: cfgRow.base_url, orgao: cfgRow.orgao, unidade: cfgRow.unidade,
+    usuario: cfgRow.usuario, senha: descriptografar(cfgRow.senha_cripto),
+  } : { base_url: process.env.SEI_BASE_URL || '' };
+
+  let imagens;
+  try {
+    const cap = await capturarFichaNoSei(cfg, { numeroSei: proc.numero_sei }, mock);
+    imagens = cap.imagens || [];
+    if (!imagens.length) return res.status(502).json({ erro: `Não encontrei a ficha no processo. ${cap.motivo || ''}`.trim() });
+  } catch (e) {
+    return res.status(502).json({ erro: `Erro ao abrir o processo no SEI: ${e.message}`, debug: e.debug || null });
+  }
+
+  let campos;
+  try {
+    campos = await extrairFichaDeArquivos(imagens.map((b) => ({ base64: b, mime: 'image/png' })));
+  } catch (e) {
+    const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "Configuração da IA".' : e.message;
+    return res.status(502).json({ erro: `OCR falhou: ${msg}` });
+  }
+
+  // Preenche APENAS os campos que estão vazios no cadastro (não sobrescreve o
+  // que já foi conferido). Retorna também tudo que a IA leu, para a tela.
+  const cols = CAMPOS.filter((c) => campos[c] !== undefined && campos[c] !== '');
+  const aGravar = cols.filter((c) => !s[c] || String(s[c]).trim() === '');
+  if (aGravar.length) {
+    db.prepare(`UPDATE servidores SET ${aGravar.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
+      .run(...aGravar.map((c) => campos[c]), s.id);
+  }
+  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, imagens: imagens.length });
 });
 
 // ---- Afastamentos (com CID) ----
