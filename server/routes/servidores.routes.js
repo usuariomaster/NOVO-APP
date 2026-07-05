@@ -9,6 +9,7 @@ import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { capturarFichaNoSei } from '../sei/detail.js';
 import { extrairFichaDeArquivos } from '../services/ia.js';
+import { timbreHTML, TIMBRE_CSS } from '../services/timbre.js';
 
 const router = Router();
 router.use(exigirLogin);
@@ -201,6 +202,42 @@ router.delete('/:id/afastamentos/:aid', (req, res) => {
   res.json({ ok: true });
 });
 
+// Comprovante de BIM (Boletim de Inspeção Médica) — imprimível, com timbre.
+router.get('/:id/bim/:aid', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  const a = db.prepare('SELECT * FROM afastamentos WHERE id = ? AND servidor_id = ?').get(req.params.aid, req.params.id);
+  if (!s || !a) return res.status(404).send('Boletim não encontrado');
+  const proc = a.processo_id ? db.prepare('SELECT numero_sei FROM processos WHERE id = ?').get(a.processo_id) : null;
+  const esc = (x) => String(x ?? '—').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const dbr = (d) => { const m = String(d || '').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—'); };
+  res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>BIM ${esc(a.bim_numero || a.id)} — ${esc(s.nome)}</title>
+    <style>body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:40px}
+    ${TIMBRE_CSS} h1{font-size:16px;text-align:center;margin:0 0 4px} .sub{text-align:center;color:#555;font-size:12px;margin-bottom:20px}
+    dl{display:grid;grid-template-columns:190px 1fr;gap:6px 12px;font-size:14px;margin:18px 0}
+    dt{color:#555;font-weight:600} .conc{display:inline-block;padding:3px 12px;border-radius:6px;font-weight:700;border:1px solid #999}
+    .ass{margin-top:70px;text-align:center}.linha{border-top:1px solid #000;width:300px;margin:0 auto;padding-top:6px}
+    @media print{.noprint{display:none}body{margin:0}}</style></head><body>
+    ${timbreHTML('Perícia Médica — Boletim de Inspeção Médica')}
+    <h1>BOLETIM DE INSPEÇÃO MÉDICA (BIM)</h1>
+    <div class="sub">Nº ${esc(a.bim_numero || a.id)}${proc ? ' · Processo ' + esc(proc.numero_sei) : ''}</div>
+    <dl>
+      <dt>Servidor</dt><dd><b>${esc(s.nome)}</b></dd>
+      <dt>Matrícula</dt><dd>${esc(s.matricula)}</dd>
+      <dt>Cargo</dt><dd>${esc(s.cargo)}</dd>
+      <dt>Lotação</dt><dd>${esc(s.secretaria || s.lotacao)}</dd>
+      <dt>Tipo</dt><dd>${esc(a.tipo)}</dd>
+      <dt>CID</dt><dd>${esc(a.cid)}${a.cid2 ? ' / ' + esc(a.cid2) : ''}</dd>
+      <dt>Data da perícia</dt><dd>${dbr(a.data_pericia)}</dd>
+      <dt>Período</dt><dd>${dbr(a.data_inicio)}${a.data_fim ? ' a ' + dbr(a.data_fim) : ''}${a.dias ? ' (' + a.dias + ' dias)' : ''}</dd>
+      <dt>Conclusão</dt><dd><span class="conc">${esc(a.conclusao || '—')}</span></dd>
+      <dt>Observações</dt><dd>${esc(a.descricao)}</dd>
+    </dl>
+    <div class="ass"><div class="linha">${esc(a.perito || 'Médico Perito')}</div></div>
+    <div class="noprint" style="text-align:center;margin-top:32px"><button onclick="print()" style="padding:10px 22px;font-size:15px">🖨 Imprimir BIM</button></div>
+  </body></html>`);
+});
+
 // ---- Prontuário (documentos médicos) ----
 router.post('/:id/documentos', (req, res) => {
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
@@ -247,10 +284,12 @@ router.get('/:id/ppp', (req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
     <title>Ficha / PPP — ${esc(s.nome)}</title>
     <style>body{font-family:Arial,sans-serif;max-width:820px;margin:28px auto;padding:0 20px;color:#111}
-    h1{font-size:18px}h2{font-size:15px;border-bottom:1px solid #ccc;padding-bottom:4px;margin-top:24px}
+    h1{font-size:17px;text-align:center}h2{font-size:15px;border-bottom:1px solid #ccc;padding-bottom:4px;margin-top:24px}
     table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border:1px solid #999;padding:5px 7px;font-size:12px;text-align:left}
     th{background:#eee}dl{display:grid;grid-template-columns:180px 1fr;gap:4px 10px;font-size:13px}dt{color:#555}
+    ${TIMBRE_CSS}
     @media print{.noprint{display:none}}</style></head><body>
+    ${timbreHTML('Perícia Médica — Ficha Funcional / PPP')}
     <h1>FICHA FUNCIONAL / DADOS PARA PPP</h1>
     <h2>Servidor</h2>
     <dl>

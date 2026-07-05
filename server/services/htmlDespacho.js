@@ -1,4 +1,6 @@
 // HTML do despacho (usado para impressão e para gerar o PDF assinado).
+import { timbreHTML, TIMBRE_CSS } from './timbre.js';
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
@@ -9,13 +11,14 @@ export function htmlDespacho(proc, d, { assinado } = {}) {
     : `<div class="ass"><div class="linha">${esc(proc.perito_nome || 'Perito')}</div></div>`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
     <title>Despacho ${esc(proc.numero_sei)}</title>
-    <style>body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:0}
-    h1{font-size:18px;text-align:center}.cab{text-align:center;margin-bottom:24px}
+    <style>body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:40px}
+    h1{font-size:16px;text-align:center;margin:0 0 18px}${TIMBRE_CSS}
     .meta{font-size:14px;margin:16px 0;border:1px solid #ccc;padding:12px;border-radius:6px}
     .meta b{display:inline-block;width:130px}.corpo{white-space:pre-wrap;margin:24px 0;text-align:justify}
     .ass{margin-top:70px;text-align:center}.linha{border-top:1px solid #000;width:280px;margin:0 auto;padding-top:6px}
-    @media print{.noprint{display:none}}</style></head><body>
-    <div class="cab"><h1>PERÍCIA / JUNTA MÉDICA — DESPACHO</h1></div>
+    @media print{.noprint{display:none}body{margin:0}}</style></head><body>
+    ${timbreHTML('Perícia Médica / Junta Médica')}
+    <h1>DESPACHO PERICIAL</h1>
     <div class="meta">
       <div><b>Processo:</b> ${esc(proc.numero_sei)}${proc.fisico ? ' (físico)' : ''}</div>
       <div><b>Interessado:</b> ${esc(proc.interessado || '—')}</div>

@@ -788,7 +788,9 @@ async function renderServidorDetalhe(id) {
           ${a.descricao ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(a.descricao)}</div>` : ''}
           ${a.perito ? `<div class="muted" style="font-size:12px">Perito: ${esc(a.perito)}</div>` : ''}
         </div>
-        <div style="display:flex;gap:4px"><button class="btn secondary sm" data-editaf="${a.id}">✏️</button><button class="btn danger sm" data-delaf="${a.id}">🗑</button></div>
+        <div style="display:flex;gap:4px">
+          <a class="btn secondary sm" href="/api/servidores/${id}/bim/${a.id}" target="_blank" rel="noopener" title="Emitir comprovante de BIM">🖨 BIM</a>
+          <button class="btn secondary sm" data-editaf="${a.id}">✏️</button><button class="btn danger sm" data-delaf="${a.id}">🗑</button></div>
       </div>
     </div>`).join('')
     : '<span class="muted">Nenhuma ocorrência/BIM registrada. Elas entram sozinhas ao ler os despachos, ou registre manualmente.</span>';
