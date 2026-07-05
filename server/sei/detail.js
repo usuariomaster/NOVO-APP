@@ -138,51 +138,84 @@ async function amostraDocumento(page) {
 }
 
 // Gera o PDF do processo inteiro usando a função nativa do SEI
-// ("Gerar Arquivo PDF do Processo") e salva o arquivo. Retorna o nome
-// do arquivo salvo, ou null se não conseguiu.
+// ("Gerar Arquivo PDF do Processo") e salva o arquivo. Trata os 3 finais
+// possíveis: download direto, popup que baixa, ou popup que ABRE o PDF
+// (nesse caso baixamos via requisição autenticada). Retorna o nome ou null.
 async function gerarPdfProcesso(page, dir, processoId) {
-  // 1) Procura e clica em "Gerar Arquivo PDF do Processo" (na barra do processo).
-  let abriu = false;
-  for (const f of page.frames()) {
+  const context = page.context();
+  const destino = join(dir, `processo-${processoId}.pdf`);
+  const salvarDownload = async (dl) => { try { await dl.saveAs(destino); return true; } catch { return false; } };
+  const salvarPorUrl = async (url) => {
     try {
-      const link = f
-        .locator('a[href*="procedimento_gerar_pdf"], img[title*="Gerar Arquivo PDF do Processo"], a:has-text("Gerar Arquivo PDF")')
-        .first();
-      if (await link.count()) {
-        await link.click({ timeout: 10000 });
-        abriu = true;
-        break;
-      }
-    } catch { /* tenta o próximo quadro */ }
-  }
-  if (!abriu) return null;
-  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(1200);
-
-  // 2) Na tela de geração, clica "Gerar" e captura o download do PDF.
-  let download = null;
-  try {
-    const [dl] = await Promise.all([
-      page.waitForEvent('download', { timeout: 90000 }).catch(() => null),
-      (async () => {
-        for (const f of page.frames()) {
-          const b = f
-            .locator('#sbmGerar, input[type="button"][value*="Gerar"], input[type="submit"][value*="Gerar"], button:has-text("Gerar"), a:has-text("Gerar")')
-            .first();
-          if (await b.count()) { await b.click({ timeout: 10000 }).catch(() => {}); break; }
-        }
-      })(),
-    ]);
-    download = dl;
-  } catch { /* ignora */ }
-
-  if (download) {
-    const nome = `processo-${processoId}.pdf`;
-    try {
-      await download.saveAs(join(dir, nome));
-      return nome;
+      const resp = await context.request.get(url, { timeout: 60000 });
+      if (resp.ok()) { const buf = await resp.body(); if (buf && buf.length > 800) { fs.writeFileSync(destino, buf); return true; } }
     } catch { /* ignora */ }
+    return false;
+  };
+
+  // 1) Clica em "Gerar Arquivo PDF do Processo" na barra do processo.
+  const seletores = [
+    'a[href*="procedimento_gerar_pdf"]',
+    'a:has-text("Gerar Arquivo PDF do Processo")',
+    'img[title*="Gerar Arquivo PDF do Processo"]',
+    'img[title*="Gerar Arquivo PDF"]',
+    'a[onclick*="gerar_pdf"]',
+  ];
+  let tela = null;
+  let dlInicial = null;
+  outer:
+  for (const f of page.frames()) {
+    for (const sel of seletores) {
+      try {
+        const link = f.locator(sel).first();
+        if (!(await link.count())) continue;
+        const [popup, dl] = await Promise.all([
+          context.waitForEvent('page', { timeout: 3500 }).catch(() => null),
+          page.waitForEvent('download', { timeout: 3500 }).catch(() => null),
+          link.click({ timeout: 8000 }).catch(() => null),
+        ]);
+        dlInicial = dl;
+        tela = popup || page;
+        break outer;
+      } catch { /* próximo */ }
+    }
   }
+  if (!tela) return null;
+  if (dlInicial && (await salvarDownload(dlInicial))) return `processo-${processoId}.pdf`;
+  await tela.waitForLoadState('domcontentloaded').catch(() => {});
+  await tela.waitForTimeout(1000);
+
+  // Se a tela já é um PDF (popup abriu o arquivo), baixa por URL.
+  if (/\.pdf(\?|$)|gerar_pdf|documento_download|arquivo_pdf/i.test(tela.url())) {
+    if (await salvarPorUrl(tela.url())) { if (tela !== page) await tela.close().catch(() => {}); return `processo-${processoId}.pdf`; }
+  }
+
+  // 2) Tela de opções: clica "Gerar" e captura download OU popup com o PDF.
+  const clicarGerar = async () => {
+    for (const f of tela.frames()) {
+      try {
+        const b = f.locator('#sbmGerar, input[value*="Gerar"], button:has-text("Gerar"), a:has-text("Gerar")').first();
+        if (await b.count()) { await b.click({ timeout: 8000 }).catch(() => {}); return; }
+      } catch { /* próximo */ }
+    }
+  };
+  let download = null, popup2 = null;
+  try {
+    [download, popup2] = await Promise.all([
+      tela.waitForEvent('download', { timeout: 60000 }).catch(() => null),
+      context.waitForEvent('page', { timeout: 60000 }).catch(() => null),
+      clicarGerar(),
+    ]);
+  } catch { /* ignora */ }
+  if (download && (await salvarDownload(download))) { if (tela !== page) await tela.close().catch(() => {}); return `processo-${processoId}.pdf`; }
+  if (popup2) {
+    await popup2.waitForLoadState('domcontentloaded').catch(() => {});
+    const dl2 = await popup2.waitForEvent('download', { timeout: 8000 }).catch(() => null);
+    if (dl2 && (await salvarDownload(dl2))) { await popup2.close().catch(() => {}); return `processo-${processoId}.pdf`; }
+    if (await salvarPorUrl(popup2.url())) { await popup2.close().catch(() => {}); return `processo-${processoId}.pdf`; }
+    await popup2.close().catch(() => {});
+  }
+  if (tela !== page) await tela.close().catch(() => {});
   return null;
 }
 
