@@ -111,6 +111,7 @@ const rotas = {
 };
 
 async function navegar() {
+  if (!usuario) return; // deslogado: nada a renderizar (o login cuida da tela)
   const hash = location.hash;
   const fn = hash.startsWith('#processo/')
     ? () => renderProcessoDetalhe(hash.split('/')[1])
@@ -171,10 +172,16 @@ function shell(conteudo) {
         <div class="user">
           <div class="nome">${esc(usuario.nome)}</div>
           <div class="papel">${esc(PAPEL_LABEL[usuario.papel] || usuario.papel)}</div>
+          <button id="btn-senha" class="secondary">🔒 Trocar senha</button>
           <button id="btn-sair">Sair</button>
         </div>
       </aside>
-      <main class="main" id="main-content">${conteudo}</main>
+      <main class="main">
+        <div id="aviso-topo">${usuario.senha_padrao ? `<div class="aviso-seguranca">
+          🔒 <b>Senha padrão em uso.</b> Este acesso ainda usa a senha de fábrica (<code>admin123</code>).
+          Troque agora para proteger o sistema. <button id="aviso-trocar">Trocar senha</button></div>` : ''}</div>
+        <div id="main-content">${conteudo}</div>
+      </main>
     </div>`;
   document.getElementById('btn-sair').onclick = async () => {
     await api.post('/api/auth/logout');
@@ -182,6 +189,9 @@ function shell(conteudo) {
     location.hash = '';
     renderLogin();
   };
+  document.getElementById('btn-senha').onclick = trocarSenha;
+  const avisoBtn = document.getElementById('aviso-trocar');
+  if (avisoBtn) avisoBtn.onclick = trocarSenha;
   navegar._marcarNav?.();
   atualizarBadgeCaixa();
 }
@@ -195,6 +205,23 @@ async function atualizarBadgeCaixa() {
     if (r.total > 0) { el.textContent = r.total; el.classList.add('on'); }
     else { el.textContent = ''; el.classList.remove('on'); }
   } catch { /* ignora */ }
+}
+
+// Troca da própria senha (primeiro acesso / rotina de segurança).
+async function trocarSenha() {
+  const r = await modal({ titulo: '🔒 Trocar minha senha', okLabel: 'Salvar', corpo: `
+    <div class="field"><label>Senha atual</label><input type="password" name="senha_atual" autocomplete="current-password"></div>
+    <div class="field"><label>Nova senha (mínimo 6 caracteres)</label><input type="password" name="nova_senha" autocomplete="new-password"></div>
+    <div class="field"><label>Repita a nova senha</label><input type="password" name="confirmar" autocomplete="new-password"></div>` });
+  if (!r) return;
+  if (!r.nova_senha || r.nova_senha.length < 6) return toast('A nova senha deve ter ao menos 6 caracteres.', true);
+  if (r.nova_senha !== r.confirmar) return toast('A confirmação não confere com a nova senha.', true);
+  try {
+    await api.post('/api/auth/trocar-senha', { senha_atual: r.senha_atual, nova_senha: r.nova_senha });
+    usuario.senha_padrao = false;
+    const t = document.getElementById('aviso-topo'); if (t) t.innerHTML = '';
+    toast('Senha alterada com sucesso.');
+  } catch (e) { toast(e.message, true); }
 }
 
 function setMain(html) {
