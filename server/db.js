@@ -225,6 +225,14 @@ garantirColuna('processos', 'data_encaminhado', 'data_encaminhado TEXT');
 garantirColuna('processos', 'arquivado', 'arquivado INTEGER NOT NULL DEFAULT 0');
 garantirColuna('processos', 'arquivado_em', 'arquivado_em TEXT');
 
+// Ocorrências / BIM (Boletim de Inspeção Médica): cada perícia de um servidor.
+// Reaproveita a tabela afastamentos, acrescentando data da perícia, conclusão
+// e o perito responsável, para virar um boletim individualizado por processo.
+garantirColuna('afastamentos', 'data_pericia', 'data_pericia TEXT');
+garantirColuna('afastamentos', 'conclusao', 'conclusao TEXT');
+garantirColuna('afastamentos', 'perito', 'perito TEXT');
+garantirColuna('afastamentos', 'bim_numero', 'bim_numero TEXT');
+
 // Servidor periciado (a pessoa dos processos) — vínculo com o processo
 garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');
 

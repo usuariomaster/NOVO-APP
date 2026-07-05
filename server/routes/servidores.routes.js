@@ -163,11 +163,12 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
   res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem, temFicha, afastamentos: nAfast });
 });
 
-// ---- Afastamentos (com CID) ----
+// ---- Ocorrências / BIM (Boletim de Inspeção Médica), com CID ----
 router.post('/:id/afastamentos', (req, res) => {
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
   if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
-  const { tipo, cid, cid2, data_inicio, data_fim, dias, descricao, processo_id } = req.body || {};
+  const { tipo, cid, cid2, data_inicio, data_fim, dias, descricao, processo_id,
+    data_pericia, conclusao, perito, bim_numero } = req.body || {};
   // calcula dias se não informado
   let d = dias ? parseInt(dias, 10) : null;
   if (!d && data_inicio && data_fim) {
@@ -175,10 +176,24 @@ router.post('/:id/afastamentos', (req, res) => {
     if (!isNaN(di) && !isNaN(df)) d = Math.max(0, Math.round((df - di) / 86400000) + 1);
   }
   const info = db.prepare(
-    `INSERT INTO afastamentos (servidor_id, processo_id, tipo, cid, cid2, data_inicio, data_fim, dias, descricao)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(s.id, processo_id || null, tipo || null, cid || null, cid2 || null, data_inicio || null, data_fim || null, d, descricao || null);
+    `INSERT INTO afastamentos (servidor_id, processo_id, tipo, cid, cid2, data_inicio, data_fim, dias, descricao,
+       data_pericia, conclusao, perito, bim_numero)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(s.id, processo_id || null, tipo || null, cid || null, cid2 || null, data_inicio || null, data_fim || null, d,
+    descricao || null, data_pericia || null, conclusao || null, perito || null, bim_numero || null);
   res.status(201).json({ id: info.lastInsertRowid });
+});
+
+// Atualiza uma ocorrência/BIM.
+router.put('/:id/afastamentos/:aid', (req, res) => {
+  const campos = ['tipo', 'cid', 'cid2', 'data_inicio', 'data_fim', 'dias', 'descricao', 'processo_id', 'data_pericia', 'conclusao', 'perito', 'bim_numero'];
+  const b = req.body || {};
+  const cols = campos.filter((c) => b[c] !== undefined);
+  if (cols.length) {
+    db.prepare(`UPDATE afastamentos SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ? AND servidor_id = ?`)
+      .run(...cols.map((c) => b[c] || null), req.params.aid, req.params.id);
+  }
+  res.json({ ok: true });
 });
 
 router.delete('/:id/afastamentos/:aid', (req, res) => {

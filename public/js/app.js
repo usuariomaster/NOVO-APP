@@ -141,7 +141,6 @@ function shell(conteudo) {
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#processos">📁 ${isPerito ? 'Meus processos' : 'Processos'}</a>`,
     `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
-    `<a href="#ocorrencias">🩺 Ocorrências (CID)</a>`,
     isOper ? `<a href="#mensageiro">🚚 Mensageiro</a>` : '',
     isAdmin ? `<a href="#usuarios">👥 Usuários</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
@@ -230,61 +229,69 @@ function farol(p, cfg) {
 
 async function renderPainel() {
   shell('<div class="empty">Carregando…</div>');
-  const [resumo, procs, cfg] = await Promise.all([
-    api.get('/api/processos/resumo'),
-    api.get('/api/processos'),
-    api.get('/api/processos/config-prazos').catch(() => ({ prazo_dias: 10, atraso_dias: 5 })),
-  ]);
-
   const isPerito = ehPerito();
   const isOper = ehOper();
+  const [procs, cfg, tipos, ocor, servs] = await Promise.all([
+    api.get('/api/processos'),
+    api.get('/api/processos/config-prazos').catch(() => ({ prazo_dias: 10, atraso_dias: 5 })),
+    api.get('/api/processos/tipos').catch(() => []),
+    api.get('/api/processos/ocorrencias').catch(() => ({ ocorrencias: [], porCid: {} })),
+    isPerito ? Promise.resolve([]) : api.get('/api/servidores').catch(() => []),
+  ]);
 
-  // Processos "em tramitação" (não concluídos) com farol.
   const emTramite = procs.filter((p) => !['concluido'].includes(p.status));
   const contagem = { v: 0, a: 0, r: 0 };
-  for (const p of emTramite) {
-    const f = farol(p, cfg);
-    if (f.cor) contagem[f.cor]++;
-  }
+  for (const p of emTramite) { const f = farol(p, cfg); if (f.cor) contagem[f.cor]++; }
 
-  const kpiPrazos = `
+  // KPIs de visão geral (é isto que diferencia o Painel da lista de Processos).
+  const kpis = `
     <div class="kpis">
       <div class="kpi"><div class="n">${emTramite.length}</div><div class="l">Em tramitação</div></div>
       <div class="kpi"><div class="n">🟢 ${contagem.v}</div><div class="l">No prazo</div></div>
       <div class="kpi"><div class="n">🟡 ${contagem.a}</div><div class="l">Passou do prazo</div></div>
       <div class="kpi"><div class="n">🔴 ${contagem.r}</div><div class="l">Atrasado</div></div>
+      ${!isPerito ? `<div class="kpi"><div class="n">${servs.length}</div><div class="l">Servidores</div></div>
+      <div class="kpi"><div class="n">${(ocor.ocorrencias || []).length}</div><div class="l">Ocorrências (CID)</div></div>` : ''}
     </div>`;
 
-  const linhas = emTramite
-    .sort((a, b) => (farol(b, cfg).dias || 0) - (farol(a, cfg).dias || 0))
-    .map((p) => {
-      const f = farol(p, cfg);
-      return `<tr data-id="${p.id}">
-        <td style="font-size:18px" title="${esc(f.label)}">${f.dot}</td>
-        <td class="num-proc">${esc(p.numero_sei)}</td>
-        <td>${esc(p.especificacao || p.tipo || '—')}<br><span class="muted">${esc(p.interessado || '')}</span></td>
-        ${isOper ? `<td>${esc(p.perito_nome || '<sem perito>')}</td>` : ''}
-        <td>${badge(p.status)}</td>
-        <td class="muted">${esc(f.label)}</td>
-      </tr>`;
-    }).join('');
+  // Só os processos que EXIGEM atenção (🟡🔴) — a lista completa é a tela Processos.
+  const urgentes = emTramite.filter((p) => ['a', 'r'].includes(farol(p, cfg).cor))
+    .sort((a, b) => (farol(b, cfg).dias || 0) - (farol(a, cfg).dias || 0)).slice(0, 12);
+  const linhas = urgentes.map((p) => {
+    const f = farol(p, cfg);
+    return `<tr data-id="${p.id}">
+      <td style="font-size:18px" title="${esc(f.label)}">${f.dot}</td>
+      <td class="num-proc">${esc(p.numero_sei)}</td>
+      <td><b>${esc(p.interessado || '—')}</b><br><span class="muted">${esc(p.especificacao || p.tipo || '')}</span></td>
+      ${isOper ? `<td>${esc(p.perito_nome || '<sem perito>')}</td>` : ''}
+      <td>${badge(p.status)}</td><td class="muted">${esc(f.label)}</td></tr>`;
+  }).join('');
+
+  // Mini-painéis: por assunto e por CID.
+  const topAssunto = (tipos || []).slice(0, 6).map((t) =>
+    `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)"><span>${esc(t.assunto)}</span><b>${t.total}</b></div>`).join('') || '<span class="muted">—</span>';
+  const topCid = Object.entries(ocor.porCid || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, n]) =>
+    `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)"><span>${esc(c)}</span><b>${n}</b></div>`).join('') || '<span class="muted">—</span>';
 
   const configBtn = ehAdmin()
     ? `<button class="btn secondary" id="btn-prazos">⏱ Configurar prazos (${cfg.prazo_dias}d / ${cfg.atraso_dias}d)</button>` : '';
 
   setMain(`
     <div class="page-head">
-      <div><h2>Painel</h2><div class="desc">Olá, ${esc(usuario.nome)}.
-        ${isPerito ? 'Seus processos e prazos de resposta.' : 'Processos em tramitação na perícia e seus prazos.'}</div></div>
+      <div><h2>Painel</h2><div class="desc">Olá, ${esc(usuario.nome)}. Visão geral da perícia.</div></div>
       ${configBtn}
     </div>
-    ${kpiPrazos}
+    ${kpis}
     <div class="card">
-      <div class="card-h">${isPerito ? 'Meus processos' : 'Em tramitação'} — prazo 🟢 até ${cfg.prazo_dias}d · 🟡 até ${cfg.prazo_dias + cfg.atraso_dias}d · 🔴 acima</div>
-      <div>${emTramite.length ? `<table>
-        <thead><tr><th>Prazo</th><th>Nº</th><th>Assunto / Interessado</th>${isOper ? '<th>Médico</th>' : ''}<th>Status</th><th>Tempo</th></tr></thead>
-        <tbody>${linhas}</tbody></table>` : '<div class="empty">Nenhum processo em tramitação.</div>'}</div>
+      <div class="card-h">⚠️ Precisam de atenção (fora do prazo) <a href="#processos" class="muted" style="font-weight:400;font-size:13px">ver todos os processos →</a></div>
+      <div>${urgentes.length ? `<table>
+        <thead><tr><th>Prazo</th><th>Nº</th><th>Servidor / assunto</th>${isOper ? '<th>Médico</th>' : ''}<th>Status</th><th>Tempo</th></tr></thead>
+        <tbody>${linhas}</tbody></table>` : '<div class="empty">Tudo dentro do prazo 🎉</div>'}</div>
     </div>
+    ${!isPerito ? `<div class="detail-grid">
+      <div class="card"><div class="card-h">Processos por assunto</div><div class="card-b">${topAssunto}</div></div>
+      <div class="card"><div class="card-h">Ocorrências por CID</div><div class="card-b">${topCid}</div></div>
+    </div>` : ''}
   `);
 
   document.querySelectorAll('#main-content tr[data-id]').forEach((tr) => {
@@ -583,8 +590,9 @@ async function renderOcorrencias() {
   };
   setMain(`
     <div class="page-head"><div>
-      <h2>🩺 Ocorrências (CID)</h2>
-      <div class="desc">Afastamentos e licenças de todos os servidores, com CID — base para o controle epidemiológico e o PPP.</div>
+      <a href="#servidores" class="muted">← servidores</a>
+      <h2 style="margin-top:4px">🩺 Ocorrências (CID)</h2>
+      <div class="desc">Ocorrências/BIM de todos os servidores, com CID — base para o controle epidemiológico e o PPP.</div>
     </div></div>
     <div class="toolbar"><input type="search" id="oc-busca" placeholder="Filtrar por CID (ex.: M54)"></div>
     <div class="card"><div class="card-h">Resumo por CID</div><div class="card-b" id="oc-resumo">…</div></div>
@@ -600,8 +608,11 @@ async function renderServidores() {
   setMain(`
     <div class="page-head">
       <div><h2>Servidores <span class="badge pr-normal" style="font-size:14px">${lista.length}</span></h2>
-      <div class="desc">Pessoas periciadas — ficha funcional, afastamentos (CID), prontuário e base para PPP.</div></div>
-      <button class="btn" id="btn-novo-serv">＋ Novo servidor</button>
+      <div class="desc">Pessoas periciadas — ficha funcional, ocorrências/BIM (CID), prontuário e base para PPP.</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn secondary" href="#ocorrencias">🩺 Ocorrências (CID)</a>
+        <button class="btn" id="btn-novo-serv">＋ Novo servidor</button>
+      </div>
     </div>
     <div class="toolbar"><input type="search" id="busca-serv" placeholder="Buscar nome, CPF, matrícula…"></div>
     <div class="card"><div id="lista-serv"></div></div>
@@ -659,13 +670,29 @@ async function renderServidorDetalhe(id) {
   const iaAviso = s.ia_atualizado_em ? `<span class="muted" style="font-size:12px">gerado por IA em ${esc(s.ia_atualizado_em)}</span>` : '';
   const fichaAviso = s.ficha_atualizada_em ? `<span class="muted" style="font-size:12px">ficha atualizada em ${esc(s.ficha_atualizada_em)}</span>` : '';
 
-  const afast = s.afastamentos.length ? `<table>
-    <thead><tr><th>Início</th><th>Fim</th><th>Dias</th><th>CID</th><th>Tipo</th><th></th></tr></thead>
-    <tbody>${s.afastamentos.map((a) => `<tr>
-      <td>${esc(a.data_inicio || '—')}</td><td>${esc(a.data_fim || '—')}</td><td>${a.dias ?? '—'}</td>
-      <td><b>${esc(a.cid || '—')}</b>${a.cid2 ? '/' + esc(a.cid2) : ''}</td><td>${esc(a.tipo || '—')}</td>
-      <td><button class="btn danger sm" data-delaf="${a.id}">🗑</button></td></tr>`).join('')}</tbody></table>`
-    : '<span class="muted">Nenhum afastamento registrado.</span>';
+  // Ocorrências / BIM: cada perícia é um boletim individualizado, ligado ao
+  // seu processo, com CID, conclusão e período. Cartão por ocorrência.
+  const procDe = {}; for (const p of s.processos) procDe[p.id] = p.numero_sei;
+  const concCor = (c) => /defer|apto|conced/i.test(c || '') ? 'pr-normal' : /indefer|inapto|neg/i.test(c || '') ? 'pr-alta' : 'pr-normal';
+  const afast = s.afastamentos.length ? s.afastamentos.map((a) => `
+    <div class="card" style="margin:0 0 10px;border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px 12px">
+        <div>
+          <div><b>${esc(a.tipo || 'Ocorrência')}</b> ${a.conclusao ? `<span class="badge ${concCor(a.conclusao)}" style="font-size:11px">${esc(a.conclusao)}</span>` : ''}</div>
+          <div class="muted" style="font-size:13px;margin-top:2px">
+            CID <b>${esc(a.cid || '—')}</b>${a.cid2 ? '/' + esc(a.cid2) : ''}
+            ${a.data_inicio ? ` • ${dataBR(a.data_inicio)}${a.data_fim ? ' a ' + dataBR(a.data_fim) : ''}` : ''}
+            ${a.dias ? ` • ${a.dias} dia(s)` : ''}
+            ${a.data_pericia ? ` • perícia ${dataBR(a.data_pericia)}` : ''}
+          </div>
+          ${a.processo_id && procDe[a.processo_id] ? `<div style="font-size:12px;margin-top:2px"><a href="#processo/${a.processo_id}" class="num-proc">📁 ${esc(procDe[a.processo_id])}</a></div>` : ''}
+          ${a.descricao ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(a.descricao)}</div>` : ''}
+          ${a.perito ? `<div class="muted" style="font-size:12px">Perito: ${esc(a.perito)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:4px"><button class="btn secondary sm" data-editaf="${a.id}">✏️</button><button class="btn danger sm" data-delaf="${a.id}">🗑</button></div>
+      </div>
+    </div>`).join('')
+    : '<span class="muted">Nenhuma ocorrência/BIM registrada. Elas entram sozinhas ao ler os despachos, ou registre manualmente.</span>';
 
   const docs = s.documentos.length ? s.documentos.map((d) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
       <span style="flex:1"><b>${esc(d.tipo)}</b> <span class="muted">${esc(d.nome_orig || '')}</span></span>
@@ -708,7 +735,7 @@ async function renderServidorDetalhe(id) {
             <button class="btn secondary sm" id="s-ia-cbo">🤖 Gerar por CBO</button>
             <button class="btn sm" id="s-salvar-2">Salvar</button></span></div>
           <div class="card-b">${segTrab}</div></div>
-        <div class="card"><div class="card-h">Afastamentos (CID) <button class="btn sm" id="s-add-af">＋ Afastamento</button></div>
+        <div class="card"><div class="card-h">🩺 Ocorrências / BIM (CID) <button class="btn sm" id="s-add-af">＋ Nova ocorrência</button></div>
           <div class="card-b">${afast}</div></div>
       </div>
       <div>
@@ -825,18 +852,38 @@ async function renderServidorDetalhe(id) {
       toast(msg, true);
     }
   };
+  // Formulário de ocorrência/BIM (novo ou edição), individualizado por processo.
+  const formOcorrencia = (a = {}) => `
+    <div class="field"><label>Processo (a qual perícia se refere)</label>
+      <select name="processo_id"><option value="">— sem vínculo —</option>${
+        s.processos.map((p) => `<option value="${p.id}" ${String(a.processo_id) === String(p.id) ? 'selected' : ''}>${esc(p.numero_sei)} — ${esc(p.especificacao || p.tipo || '')}</option>`).join('')
+      }</select></div>
+    <div class="row"><div class="field"><label>Tipo</label>
+      <input name="tipo" placeholder="ex.: Afastamento, Redução de carga horária, Reconsideração" value="${esc(a.tipo || '')}"></div>
+      <div class="field"><label>Conclusão / decisão</label>
+      <input name="conclusao" list="conc-list" placeholder="Deferido / Indeferido / Diligência" value="${esc(a.conclusao || '')}">
+      <datalist id="conc-list"><option value="Deferido"><option value="Indeferido"><option value="Diligência"><option value="Apto"><option value="Inapto"></datalist></div></div>
+    <div class="row"><div class="field"><label>CID</label><input name="cid" placeholder="ex.: M54.5" value="${esc(a.cid || '')}"></div>
+      <div class="field"><label>CID 2 (opcional)</label><input name="cid2" value="${esc(a.cid2 || '')}"></div></div>
+    <div class="row"><div class="field"><label>Data da perícia</label><input name="data_pericia" type="date" value="${esc(a.data_pericia || '')}"></div>
+      <div class="field"><label>Nº do BIM</label><input name="bim_numero" value="${esc(a.bim_numero || '')}"></div></div>
+    <div class="row"><div class="field"><label>Início do afastamento</label><input name="data_inicio" type="date" value="${esc(a.data_inicio || '')}"></div>
+      <div class="field"><label>Fim</label><input name="data_fim" type="date" value="${esc(a.data_fim || '')}"></div></div>
+    <div class="field"><label>Perito responsável</label><input name="perito" value="${esc(a.perito || '')}"></div>
+    <div class="field"><label>Descrição / observações</label><input name="descricao" value="${esc(a.descricao || '')}"></div>`;
   document.getElementById('s-add-af').onclick = async () => {
-    const r = await modal({ titulo: 'Registrar afastamento', okLabel: 'Salvar', corpo: `
-      <div class="row"><div class="field"><label>Início</label><input name="data_inicio" type="date"></div>
-      <div class="field"><label>Fim</label><input name="data_fim" type="date"></div></div>
-      <div class="row"><div class="field"><label>CID</label><input name="cid" placeholder="ex.: M54.5"></div>
-      <div class="field"><label>CID 2 (opcional)</label><input name="cid2"></div></div>
-      <div class="field"><label>Tipo</label><input name="tipo" placeholder="ex.: Licença médica"></div>
-      <div class="field"><label>Descrição</label><input name="descricao"></div>` });
+    const r = await modal({ titulo: '＋ Nova ocorrência / BIM', okLabel: 'Salvar', corpo: formOcorrencia() });
     if (!r) return;
-    try { await api.post(`/api/servidores/${id}/afastamentos`, r); toast('Afastamento registrado'); renderServidorDetalhe(id); }
+    try { await api.post(`/api/servidores/${id}/afastamentos`, r); toast('Ocorrência registrada'); renderServidorDetalhe(id); }
     catch (e) { toast(e.message, true); }
   };
+  document.querySelectorAll('[data-editaf]').forEach((b) => { b.onclick = async () => {
+    const a = s.afastamentos.find((x) => String(x.id) === b.dataset.editaf) || {};
+    const r = await modal({ titulo: 'Editar ocorrência / BIM', okLabel: 'Salvar', corpo: formOcorrencia(a) });
+    if (!r) return;
+    try { await api.put(`/api/servidores/${id}/afastamentos/${b.dataset.editaf}`, r); toast('Ocorrência atualizada'); renderServidorDetalhe(id); }
+    catch (e) { toast(e.message, true); }
+  }; });
   document.querySelectorAll('[data-delaf]').forEach((b) => { b.onclick = async () => { await api.del(`/api/servidores/${id}/afastamentos/${b.dataset.delaf}`); renderServidorDetalhe(id); }; });
   document.querySelectorAll('[data-deldoc]').forEach((b) => { b.onclick = async () => { await api.del(`/api/servidores/${id}/documentos/${b.dataset.deldoc}`); renderServidorDetalhe(id); }; });
   document.getElementById('s-doc-up').onclick = async () => {
