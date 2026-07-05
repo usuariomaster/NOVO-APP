@@ -441,11 +441,23 @@ async function extrairDoSei() {
     if (r.porUnidade && Object.keys(r.porUnidade).length) {
       const linhas = Object.entries(r.porUnidade)
         .map(([u, n]) => `<li><b>${esc(u)}</b>: ${n} processo(s)</li>`).join('');
+      // Se só veio 1 unidade, mostra o diagnóstico das unidades encontradas
+      // (para descobrir por que a 2ª unidade não foi lida) direto na tela.
+      let diag = '';
+      if (r.modo === 'sei' && Object.keys(r.porUnidade).length < 2 && r.unidadesDebug) {
+        const achadas = (r.unidadesEncontradas || []).length;
+        diag = `<details style="margin-top:14px"${achadas ? '' : ' open'}>
+          <summary style="cursor:pointer;color:var(--muted)">🔎 Diagnóstico das unidades (por que veio só uma?)</summary>
+          <p class="muted" style="margin:8px 0 4px">O robô encontrou <b>${achadas}</b> unidade(s) na tela "Alterar Unidade".
+          Se faltou a 2ª unidade, <b>copie o texto abaixo e me mande</b> para eu calibrar o botão de troca:</p>
+          <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.unidadesDebug)}</textarea>
+        </details>`;
+      }
       await modal({
         titulo: 'Extração concluída',
         okLabel: 'Ver processos',
         corpo: `<p><b>${r.novos}</b> novo(s) e <b>${r.ignorados}</b> já existente(s).</p>
-          <p class="muted">De onde vieram:</p><ul style="margin:0;padding-left:18px">${linhas}</ul>`,
+          <p class="muted">De onde vieram:</p><ul style="margin:0;padding-left:18px">${linhas}</ul>${diag}`,
       });
     } else {
       toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);

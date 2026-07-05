@@ -165,6 +165,8 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
     porUnidade: resultado.porUnidade || null,
     debug: resultado.debug || null,
     amostra: resultado.amostra || null,
+    unidadesEncontradas: resultado.unidadesEncontradas || null,
+    unidadesDebug: resultado.unidadesDebug || null,
   });
 });
 
