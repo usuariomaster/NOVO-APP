@@ -299,24 +299,54 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
   try {
     const auth = await autenticar(browser, cfg);
     page = auth.page;
-    await abrirProcesso(page, auth.baseUrl, dados.numeroSei);
-
-    const documentos = await coletarDocumentos(page);
-    const amostra = await coletarAmostra(page);
-    const debug = await salvarDiagnostico(page, `debug-processo`);
-    // Gera o PDF do processo inteiro só se pedido (é pesado; por padrão
-    // arquivamos apenas os metadados + documentos, que é mais leve).
-    let pdfProcesso = null;
-    if (dados.dir && dados.genPdf) {
-      pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
-    }
-    // Metadados por último: navega para a autuação (Consultar/Alterar).
-    const meta = await coletarMetadados(page);
-    const amostraMeta = meta._amostra; delete meta._amostra;
-    return { modo: 'sei', ...meta, documentos, pdfProcesso, amostra, amostraMeta, debug };
+    return await detalharNaPagina(page, auth.baseUrl, dados);
   } catch (e) {
     if (page && !e.debug) e.debug = await salvarDiagnostico(page, 'debug-processo-erro');
     throw e;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+// Detalha UM processo numa página já autenticada (reutilizável no lote).
+async function detalharNaPagina(page, baseUrl, dados) {
+  await abrirProcesso(page, baseUrl, dados.numeroSei);
+  const documentos = await coletarDocumentos(page);
+  const amostra = await coletarAmostra(page);
+  const debug = await salvarDiagnostico(page, `debug-processo`);
+  let pdfProcesso = null;
+  if (dados.dir && dados.genPdf) {
+    pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
+  }
+  const meta = await coletarMetadados(page);
+  const amostraMeta = meta._amostra; delete meta._amostra;
+  return { modo: 'sei', ...meta, documentos, pdfProcesso, amostra, amostraMeta, debug };
+}
+
+// Detalha VÁRIOS processos reaproveitando UMA sessão/navegador (bem mais
+// rápido que logar a cada processo). onItem(idx, item, resultadoOuErro) é
+// chamado a cada processo para persistência incremental.
+export async function detalharVariosNoSei(cfg, itens, mock, onItem) {
+  if (mock) {
+    for (let i = 0; i < itens.length; i++) {
+      const r = await detalharProcessoNoSei(cfg, itens[i], true);
+      await onItem?.(i, itens[i], r, null);
+    }
+    return;
+  }
+  const browser = await abrirNavegador();
+  let page = null;
+  try {
+    const auth = await autenticar(browser, cfg);
+    page = auth.page;
+    for (let i = 0; i < itens.length; i++) {
+      try {
+        const r = await detalharNaPagina(page, auth.baseUrl, itens[i]);
+        await onItem?.(i, itens[i], r, null);
+      } catch (e) {
+        await onItem?.(i, itens[i], null, e);
+      }
+    }
   } finally {
     await browser.close().catch(() => {});
   }

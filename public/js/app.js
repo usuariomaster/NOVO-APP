@@ -307,8 +307,9 @@ async function renderProcessos() {
   shell('<div class="empty">Carregando…</div>');
   const isOper = ehOper();
   const botoes = isOper
-    ? `<div style="display:flex;gap:8px">
+    ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
          <button class="btn secondary" id="btn-fisico">＋ Processo físico</button>
+         <button class="btn secondary" id="btn-conteudo-todos">🔎 Buscar conteúdo de todos</button>
          <button class="btn" id="btn-extrair">⬇️ Extrair do SEI</button>
        </div>` : '';
 
@@ -334,6 +335,7 @@ async function renderProcessos() {
 
   if (isOper) {
     document.getElementById('btn-extrair').onclick = extrairDoSei;
+    document.getElementById('btn-conteudo-todos').onclick = buscarConteudoTodos;
     document.getElementById('btn-fisico').onclick = async () => {
       const r = await modal({
         titulo: 'Novo processo físico',
@@ -413,6 +415,37 @@ async function carregarLista(q, status, tipo) {
       catch (err) { toast(err.message, true); }
     };
   });
+}
+
+// Busca o conteúdo (nome/assunto/tipo + documentos) de TODOS os processos
+// que ainda estão sem conteúdo. Roda em segundo plano no servidor e a tela
+// acompanha o progresso.
+async function buscarConteudoTodos() {
+  const btn = document.getElementById('btn-conteudo-todos');
+  if (!confirm('Buscar no SEI o conteúdo de todos os processos que ainda estão sem nome/assunto?\n\nIsso abre cada processo no robô e pode levar alguns minutos. Você pode continuar usando o sistema.')) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  try {
+    const ini = await api.post('/api/processos/detalhar-todos', {});
+    if (ini.total === 0) { toast(ini.mensagem || 'Nada a buscar.'); btn.disabled = false; btn.textContent = original; return; }
+    toast(`Buscando conteúdo de ${ini.total} processo(s)…`);
+    // Poll de progresso.
+    const timer = setInterval(async () => {
+      let st;
+      try { st = await api.get('/api/processos/detalhar-todos/status'); } catch { return; }
+      btn.textContent = `⏳ ${st.feitos}/${st.total}${st.atual ? ' — ' + st.atual : ''}`;
+      if (!st.rodando) {
+        clearInterval(timer);
+        btn.disabled = false; btn.textContent = original;
+        toast(`Concluído: ${st.novos} com nome, ${st.erros} com erro, de ${st.total}.`);
+        carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value, document.getElementById('filtro-tipo')?.value || '');
+      }
+    }, 2500);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = original;
+    if (e.dados?.status) toast('Já existe uma busca em andamento.', true);
+    else toast(e.message, true);
+  }
 }
 
 async function extrairDoSei() {

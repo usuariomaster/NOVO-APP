@@ -6,7 +6,7 @@ import db, { registrarHistorico, ehSimulacao, getConfig, setConfig, vincularServ
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
 import { lancarDespachoNoSei } from '../sei/writer.js';
-import { detalharProcessoNoSei } from '../sei/detail.js';
+import { detalharProcessoNoSei, detalharVariosNoSei } from '../sei/detail.js';
 import { htmlDespacho } from '../services/htmlDespacho.js';
 import { htmlParaPdfAssinado } from '../services/assinarPdf.js';
 
@@ -350,6 +350,87 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     amostraMeta: r.amostraMeta || null,
     debug: r.debug || null,
   });
+});
+
+// Persiste o resultado do detalhamento de UM processo (usado no avulso e no lote).
+function aplicarDetalhe(proc, r, usuario) {
+  db.prepare(
+    `UPDATE processos SET
+       tipo = COALESCE(?, tipo),
+       interessado = COALESCE(?, interessado),
+       especificacao = COALESCE(?, especificacao),
+       pdf_processo = COALESCE(?, pdf_processo),
+       conteudo_em = datetime('now'),
+       atualizado_em = datetime('now')
+     WHERE id = ?`
+  ).run(r.tipo || null, r.interessado || null, r.especificacao || null, r.pdfProcesso || null, proc.id);
+  if (r.interessado) vincularServidor(proc.id, r.interessado, null);
+  if (Array.isArray(r.documentos) && r.documentos.length) {
+    db.prepare('DELETE FROM documentos WHERE processo_id = ?').run(proc.id);
+    const ins = db.prepare(
+      'INSERT INTO documentos (processo_id, numero, tipo, data, link_sei, conteudo, arquivo) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    const tx = db.transaction((lista) => {
+      for (const d of lista) ins.run(proc.id, d.numero ?? null, d.tipo ?? null, d.data ?? null, d.link_sei ?? null, d.conteudo ?? null, d.arquivo ?? null);
+    });
+    tx(r.documentos);
+  }
+  db.prepare(`DELETE FROM historico WHERE processo_id = ? AND acao = 'detalhado_sei'`).run(proc.id);
+  registrarHistorico({ processoId: proc.id, usuario, acao: 'detalhado_sei', detalhe: 'Conteúdo atualizado do SEI (lote)' });
+}
+
+// ---- "Buscar conteúdo de todos" — lote em segundo plano ----
+// Um job por vez (em memória). A tela acompanha por /detalhar-todos/status.
+let jobLote = null;
+
+router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
+  if (jobLote && jobLote.rodando) return res.status(409).json({ erro: 'Já existe uma busca em andamento.', status: jobLote });
+  const mock = ehSimulacao();
+  const cfgRow = db.prepare('SELECT * FROM sei_config ORDER BY padrao DESC, id LIMIT 1').get();
+  if (!cfgRow && !mock) return res.status(400).json({ erro: 'Cadastre a configuração do SEI primeiro.' });
+
+  // Só os que ainda não têm conteúdo (interessado vazio) e não são físicos.
+  const soFaltantes = req.body?.apenasFaltantes !== false;
+  const alvos = db.prepare(
+    `SELECT * FROM processos
+     WHERE fisico = 0 ${soFaltantes ? "AND (interessado IS NULL OR interessado = '' OR conteudo_em IS NULL)" : ''}
+     ORDER BY id`
+  ).all();
+  if (!alvos.length) return res.json({ ok: true, total: 0, mensagem: 'Nada a buscar — todos já têm conteúdo.' });
+
+  jobLote = { rodando: true, total: alvos.length, feitos: 0, novos: 0, erros: 0, atual: null, iniciado: new Date().toISOString(), terminado: null };
+  const usuario = req.usuario;
+  const genPdf = cfgRow?.gerar_pdf === 1;
+
+  (async () => {
+    const itens = alvos.map((p) => {
+      const dirProc = join(DIR_DOCS, `proc-${p.id}`);
+      try { mkdirSync(dirProc, { recursive: true }); } catch { /* ignora */ }
+      return { processoId: p.id, numeroSei: p.numero_sei, dir: dirProc, genPdf, _proc: p };
+    });
+    try {
+      await detalharVariosNoSei(montarCfg(cfgRow), itens, mock, (idx, item, r, err) => {
+        jobLote.atual = item.numeroSei;
+        if (err) { jobLote.erros++; }
+        else {
+          try { aplicarDetalhe(item._proc, r, usuario); if (r.interessado) jobLote.novos++; }
+          catch { jobLote.erros++; }
+        }
+        jobLote.feitos++;
+      });
+    } catch (e) {
+      jobLote.erroFatal = e.message;
+    } finally {
+      jobLote.rodando = false;
+      jobLote.terminado = new Date().toISOString();
+    }
+  })();
+
+  res.json({ ok: true, total: alvos.length, status: jobLote });
+});
+
+router.get('/detalhar-todos/status', exigirPapel('operador', 'admin'), (req, res) => {
+  res.json(jobLote || { rodando: false, total: 0, feitos: 0, novos: 0, erros: 0 });
 });
 
 // Baixa/serve o PDF do processo inteiro (para consulta/impressão/prontuário).
