@@ -161,6 +161,29 @@ router.get('/tipos', (req, res) => {
   res.json(linhas.filter((l) => l.assunto));
 });
 
+// Caixa de entrada: o que chegou pelas 3 portas e ainda não foi triado
+// (identificado + mandado à fila). É a primeira tela do operador.
+router.get('/caixa-entrada', exigirPapel('operador', 'admin'), (req, res) => {
+  const linhas = db.prepare(
+    `${SELECT_PROC} WHERE p.arquivado = 0 AND p.triado = 0
+       AND p.status IN ('novo','em_controle')
+     ORDER BY CASE p.canal WHEN 'whatsapp' THEN 0 WHEN 'fisico' THEN 1 ELSE 2 END, p.id DESC`
+  ).all();
+  const porCanal = { sei: 0, fisico: 0, whatsapp: 0 };
+  for (const l of linhas) porCanal[l.canal] = (porCanal[l.canal] || 0) + 1;
+  res.json({ itens: linhas, porCanal, total: linhas.length });
+});
+
+// Marca como triado (sai da caixa de entrada e vai para a fila).
+router.post('/:id/triar', exigirPapel('operador', 'admin'), (req, res) => {
+  const proc = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.id);
+  if (!proc) return res.status(404).json({ erro: 'Processo não encontrado' });
+  const triar = req.body?.triar !== false;
+  db.prepare("UPDATE processos SET triado = ?, atualizado_em = datetime('now') WHERE id = ?").run(triar ? 1 : 0, proc.id);
+  registrarHistorico({ processoId: proc.id, usuario: req.usuario, acao: triar ? 'triado' : 'retornou_caixa', detalhe: triar ? 'Triado — enviado à fila' : 'Voltou à caixa de entrada' });
+  res.json({ ok: true, triado: triar });
+});
+
 // Controle de ocorrências com CID (afastamentos de todos os servidores).
 router.get('/ocorrencias', (req, res) => {
   const cid = req.query.cid ? `%${req.query.cid}%` : null;
@@ -251,13 +274,14 @@ router.post('/fisico', exigirPapel('operador', 'admin'), (req, res) => {
   if (db.prepare('SELECT id FROM processos WHERE numero_sei = ?').get(numero)) {
     return res.status(409).json({ erro: 'Já existe um processo com esse número' });
   }
+  const canal = (req.body?.canal === 'whatsapp') ? 'whatsapp' : 'fisico';
   const info = db.prepare(
     `INSERT INTO processos (numero_sei, tipo, interessado, especificacao, unidade_origem, secretaria_destino,
-       prioridade, prazo, fisico, status, operador_id)
-     VALUES (?, ?, ?, ?, 'Perícia (físico)', ?, ?, ?, 1, 'em_controle', ?)`
+       prioridade, prazo, fisico, status, operador_id, canal)
+     VALUES (?, ?, ?, ?, 'Perícia (físico)', ?, ?, ?, 1, 'em_controle', ?, ?)`
   ).run(
     numero, tipo || null, interessado || null, especificacao || null, secretaria_destino || null,
-    prioridade || 'normal', prazo || null, req.usuario.id
+    prioridade || 'normal', prazo || null, req.usuario.id, canal
   );
   if (interessado) vincularServidor(info.lastInsertRowid, interessado, null);
   registrarHistorico({ processoId: info.lastInsertRowid, usuario: req.usuario, acao: 'incluido_fisico', detalhe: 'Processo físico incluído manualmente' });

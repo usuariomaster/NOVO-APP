@@ -217,6 +217,10 @@ if (getConfig('gerar_pdf_padrao_on') !== '1') {
 }
 // Data de entrada do processo na perícia (para prazos) e tipo da perícia
 garantirColuna('processos', 'data_entrada', 'data_entrada TEXT');
+// Canal de entrada (as 3 portas): 'sei' | 'fisico' | 'whatsapp'
+garantirColuna('processos', 'canal', "canal TEXT NOT NULL DEFAULT 'sei'");
+// Triado: 1 quando o operador já identificou/classificou e mandou pra fila
+garantirColuna('processos', 'triado', 'triado INTEGER NOT NULL DEFAULT 0');
 // Situação da ficha funcional lida por OCR: 'ok' | 'ausente' | null (não tentado)
 garantirColuna('processos', 'ficha_status', 'ficha_status TEXT');
 // Data em que o processo foi encaminhado/recebido na perícia (lida do SEI)

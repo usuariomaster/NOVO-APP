@@ -96,7 +96,10 @@ function modal({ titulo, corpo, okLabel = 'Confirmar', okClasse = 'btn' }) {
 const rotas = {
   '': renderPainel,
   '#painel': renderPainel,
+  '#caixa': renderCaixaEntrada,
+  '#fila': renderProcessos,
   '#processos': renderProcessos,
+  '#arquivo': renderArquivo,
   '#servidores': renderServidores,
   '#ocorrencias': renderOcorrencias,
   '#mensageiro': renderMensageiro,
@@ -137,15 +140,21 @@ function shell(conteudo) {
   const isAdmin = usuario.papel === 'admin' || usuario.papel === 'admin_master';
   const isOper = usuario.papel === 'operador' || isAdmin;
   const isPerito = usuario.papel === 'perito' || usuario.papel === 'perito_admin';
-  const nav = [
+  const nav = (isPerito ? [
     `<a href="#painel">📊 Painel</a>`,
-    `<a href="#processos">📁 ${isPerito ? 'Meus processos' : 'Processos'}</a>`,
+    `<a href="#processos">📋 Meus casos</a>`,
     `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
-    isOper ? `<a href="#mensageiro">🚚 Mensageiro</a>` : '',
-    isAdmin ? `<a href="#usuarios">👥 Usuários</a>` : '',
+  ] : [
+    `<a href="#painel">📊 Painel</a>`,
+    `<a href="#caixa">📥 Caixa de entrada <span class="badge-caixa"></span></a>`,
+    `<a href="#fila">🗓️ Fila do dia</a>`,
+    `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
+    isOper ? `<a href="#mensageiro">🚚 Malote</a>` : '',
+    `<a href="#arquivo">🗄️ Arquivo</a>`,
+    isAdmin ? `<a href="#usuarios">👥 Usuários &amp; Peritos</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
     isAdmin ? `<a href="#ia">🤖 Configuração da IA</a>` : '',
-  ].join('');
+  ]).join('');
 
   appEl().innerHTML = `
     <div class="shell">
@@ -167,6 +176,18 @@ function shell(conteudo) {
     renderLogin();
   };
   navegar._marcarNav?.();
+  atualizarBadgeCaixa();
+}
+
+// Mostra quantos itens estão aguardando triagem na Caixa de entrada.
+async function atualizarBadgeCaixa() {
+  const el = document.querySelector('.badge-caixa');
+  if (!el) return;
+  try {
+    const r = await api.get('/api/processos/caixa-entrada');
+    if (r.total > 0) { el.textContent = r.total; el.classList.add('on'); }
+    else { el.textContent = ''; el.classList.remove('on'); }
+  } catch { /* ignora */ }
 }
 
 function setMain(html) {
@@ -315,6 +336,84 @@ async function renderPainel() {
     toast('Prazos atualizados');
     renderPainel();
   };
+}
+
+// ============================================================
+// Caixa de entrada — as 3 portas (SEI · físico · WhatsApp)
+// ============================================================
+const CANAL_TAG = {
+  sei: '<span class="canal sei">SEI</span>',
+  fisico: '<span class="canal fis">Físico</span>',
+  whatsapp: '<span class="canal wa">WhatsApp</span>',
+};
+async function renderCaixaEntrada() {
+  shell('<div class="empty">Carregando…</div>');
+  const cfg = await api.get('/api/processos/config-prazos').catch(() => ({ prazo_dias: 10, atraso_dias: 5 }));
+  const desenhar = async () => {
+    const r = await api.get('/api/processos/caixa-entrada');
+    const linha = (p) => {
+      const f = farol(p, cfg);
+      const cor = f.cor || 'v';
+      return `<tr data-id="${p.id}">
+        <td><span class="stripe ${cor}"></span></td>
+        <td><b>${esc(p.interessado || '—')}</b>${!p.interessado ? ' <span class="canal gh">identificar</span>' : ''}<br>
+          <span class="muted">${esc(p.especificacao || p.tipo || 'sem assunto')}</span></td>
+        <td class="num-proc">${esc(p.numero_sei)}</td>
+        <td>${CANAL_TAG[p.canal] || CANAL_TAG.sei}</td>
+        <td class="muted">${dataBR(p.data_entrada)}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn secondary sm" data-abrir="${p.id}">Abrir</button>
+          <button class="btn sm" data-triar="${p.id}">Triar → fila</button></td></tr>`;
+    };
+    document.getElementById('cx-canais').innerHTML = `
+      <div class="kpi"><div class="n">${r.porCanal.sei || 0}</div><div class="l">SEI</div></div>
+      <div class="kpi"><div class="n">${r.porCanal.fisico || 0}</div><div class="l">Físico / malote</div></div>
+      <div class="kpi"><div class="n">${r.porCanal.whatsapp || 0}</div><div class="l">WhatsApp</div></div>
+      <div class="kpi"><div class="n">${r.total}</div><div class="l">Total a triar</div></div>`;
+    document.getElementById('cx-lista').innerHTML = r.itens.length ? `<table>
+      <thead><tr><th></th><th>Servidor / assunto</th><th>Nº</th><th>Canal</th><th>Entrada</th><th></th></tr></thead>
+      <tbody>${r.itens.map(linha).join('')}</tbody></table>`
+      : '<div class="empty">Caixa vazia — tudo triado. 🎉</div>';
+    document.querySelectorAll('#cx-lista [data-abrir]').forEach((b) => b.onclick = () => (location.hash = `#processo/${b.dataset.abrir}`));
+    document.querySelectorAll('#cx-lista [data-triar]').forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation();
+      try { await api.post(`/api/processos/${b.dataset.triar}/triar`, {}); toast('Enviado à fila do dia'); desenhar(); atualizarBadgeCaixa(); }
+      catch (err) { toast(err.message, true); }
+    });
+  };
+  setMain(`
+    <div class="page-head"><div>
+      <h2>📥 Caixa de entrada</h2>
+      <div class="desc">O que chegou pelas 3 portas e ainda não foi triado. Identifique o servidor, confira e mande para a fila.</div>
+    </div>
+    <button class="btn secondary" id="cx-extrair">⬇️ Extrair do SEI</button></div>
+    <div class="kpis" id="cx-canais"></div>
+    <div class="card"><div id="cx-lista"><div class="empty">Carregando…</div></div></div>
+  `);
+  document.getElementById('cx-extrair').onclick = () => { location.hash = '#fila'; setTimeout(extrairDoSei, 300); };
+  await desenhar();
+}
+
+// ============================================================
+// Arquivo — processos arquivados (guardados no prontuário)
+// ============================================================
+async function renderArquivo() {
+  shell('<div class="empty">Carregando…</div>');
+  const procs = await api.get('/api/processos?status=arquivado');
+  setMain(`
+    <div class="page-head"><div>
+      <h2>🗄️ Arquivo</h2>
+      <div class="desc">Processos arquivados — encerrados e guardados no prontuário do servidor para consulta.</div>
+    </div></div>
+    <div class="card"><div id="arq-lista">${procs.length ? `<table>
+      <thead><tr><th>Nº</th><th>Servidor</th><th>Assunto</th><th>Arquivado</th><th></th></tr></thead>
+      <tbody>${procs.map((p) => `<tr data-id="${p.id}" style="cursor:pointer">
+        <td class="num-proc">${esc(p.numero_sei)}</td><td><b>${esc(p.interessado || '—')}</b></td>
+        <td>${esc(p.especificacao || p.tipo || '—')}</td><td class="muted">${dataBR(p.arquivado_em)}</td>
+        <td>${p.pdf_processo ? `<a class="btn secondary sm" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener" onclick="event.stopPropagation()">📄 PDF</a>` : ''}</td>
+      </tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhum processo arquivado.</div>'}</div></div>
+  `);
+  document.querySelectorAll('#arq-lista tr[data-id]').forEach((tr) => tr.onclick = () => (location.hash = `#processo/${tr.dataset.id}`));
 }
 
 // ============================================================
