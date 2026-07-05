@@ -151,6 +151,16 @@ router.post('/:id/arquivar', exigirPapel('operador', 'admin'), (req, res) => {
   res.json({ ok: true, arquivado: arquivar });
 });
 
+// Categorias de assunto existentes (para filtros: pedidos, recursos, etc.).
+router.get('/tipos', (req, res) => {
+  const linhas = db.prepare(
+    `SELECT COALESCE(NULLIF(tipo,''), NULLIF(especificacao,'')) AS assunto, COUNT(*) AS total
+     FROM processos WHERE arquivado = 0 AND COALESCE(NULLIF(tipo,''), NULLIF(especificacao,'')) IS NOT NULL
+     GROUP BY assunto ORDER BY total DESC, assunto`
+  ).all();
+  res.json(linhas.filter((l) => l.assunto));
+});
+
 // Controle de ocorrências com CID (afastamentos de todos os servidores).
 router.get('/ocorrencias', (req, res) => {
   const cid = req.query.cid ? `%${req.query.cid}%` : null;

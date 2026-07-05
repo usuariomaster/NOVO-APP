@@ -50,7 +50,8 @@ router.get('/:id', (req, res) => {
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
   if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
   s.processos = db.prepare(
-    `SELECT id, numero_sei, tipo, especificacao, status, fisico, data_entrada FROM processos WHERE servidor_id = ? ORDER BY id DESC`
+    `SELECT id, numero_sei, tipo, especificacao, status, fisico, data_entrada, data_encaminhado, data_autuacao, arquivado, pdf_processo
+     FROM processos WHERE servidor_id = ? ORDER BY arquivado, id DESC`
   ).all(s.id);
   s.afastamentos = db.prepare('SELECT * FROM afastamentos WHERE servidor_id = ? ORDER BY data_inicio DESC, id DESC').all(s.id);
   s.documentos = db.prepare('SELECT id, tipo, nome_orig, criado_em FROM prontuario_docs WHERE servidor_id = ? ORDER BY id DESC').all(s.id);

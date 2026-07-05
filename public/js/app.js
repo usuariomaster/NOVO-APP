@@ -337,7 +337,7 @@ async function renderProcessos() {
         <option value="arquivado">🗄️ Arquivados</option>
       </select>
       <select id="filtro-tipo">
-        <option value="">Todos os tipos</option>
+        <option value="">Todos os assuntos</option>
         ${TIPOS_PERICIA.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
       </select>
     </div>
@@ -375,6 +375,16 @@ async function renderProcessos() {
   busca.oninput = () => { clearTimeout(deb); deb = setTimeout(recarregar, 300); };
   filtro.onchange = recarregar;
   filtroTipo.onchange = recarregar;
+  // Preenche o filtro de assunto com as categorias REAIS (pedidos, recursos…).
+  api.get('/api/processos/tipos').then((tipos) => {
+    const atuais = new Set([...filtroTipo.options].map((o) => o.value));
+    for (const t of tipos) {
+      if (!t.assunto || atuais.has(t.assunto)) continue;
+      const o = document.createElement('option');
+      o.value = t.assunto; o.textContent = `${t.assunto} (${t.total})`;
+      filtroTipo.appendChild(o);
+    }
+  }).catch(() => {});
   carregarLista('', '', '');
 }
 
@@ -663,11 +673,20 @@ async function renderServidorDetalhe(id) {
       <button class="btn danger sm" data-deldoc="${d.id}">🗑</button></div>`).join('')
     : '<span class="muted">Nenhum documento no prontuário.</span>';
 
-  const procs = s.processos.length ? `<table><thead><tr><th>Processo</th><th>Tipo</th><th>Status</th></tr></thead>
-    <tbody>${s.processos.map((p) => `<tr data-proc="${p.id}" style="cursor:pointer">
+  const linhaProc = (p) => `<tr data-proc="${p.id}" style="cursor:pointer">
       <td class="num-proc">${esc(p.numero_sei)} ${p.fisico ? '<span class="badge pr-alta" style="font-size:11px">físico</span>' : ''}</td>
-      <td>${esc(p.tipo || '—')}<br><span class="muted">${esc(p.especificacao || '')}</span></td><td>${badge(p.status)}</td></tr>`).join('')}</tbody></table>`
-    : '<span class="muted">Nenhum processo vinculado.</span>';
+      <td>${esc(p.especificacao || p.tipo || '—')}<br><span class="muted">${dataBR(p.data_encaminhado || p.data_autuacao || p.data_entrada)}</span></td>
+      <td>${badge(p.status)}</td>
+      <td>${p.pdf_processo ? `<a class="btn secondary sm" href="/api/processos/${p.id}/pdf" target="_blank" rel="noopener" onclick="event.stopPropagation()">📄 PDF</a>` : ''}</td></tr>`;
+  const ativos = s.processos.filter((p) => !p.arquivado);
+  const arquivados = s.processos.filter((p) => p.arquivado);
+  const procs = ativos.length ? `<table><thead><tr><th>Processo</th><th>Assunto / data</th><th>Status</th><th></th></tr></thead>
+    <tbody>${ativos.map(linhaProc).join('')}</tbody></table>`
+    : '<span class="muted">Nenhum processo ativo.</span>';
+  // "Arquivo do servidor": processos arquivados, guardados para consulta.
+  const arquivo = arquivados.length ? `<table><thead><tr><th>Processo</th><th>Assunto / data</th><th>Status</th><th></th></tr></thead>
+    <tbody>${arquivados.map(linhaProc).join('')}</tbody></table>`
+    : '<span class="muted">Nenhum processo arquivado.</span>';
 
   setMain(`
     <div class="page-head"><div>
@@ -694,6 +713,7 @@ async function renderServidorDetalhe(id) {
       </div>
       <div>
         <div class="card"><div class="card-h">Processos na perícia</div><div class="card-b">${procs}</div></div>
+        <div class="card"><div class="card-h">🗄️ Arquivo do servidor <span class="muted" style="font-weight:400;font-size:12px">${arquivados.length} arquivado(s)</span></div><div class="card-b">${arquivo}</div></div>
         <div class="card"><div class="card-h">Prontuário médico</div><div class="card-b">
           <div id="s-docs">${docs}</div>
           <div class="row" style="margin-top:10px;align-items:flex-end">
