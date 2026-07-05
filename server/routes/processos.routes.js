@@ -22,9 +22,19 @@ const COLS_FICHA_SERV = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao
   'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email'];
 
 // Preenche a ficha do servidor com o que o OCR leu — só os campos vazios.
-async function ocrFichaParaServidor(servidorId, fichaImagens) {
-  if (!servidorId || !fichaImagens?.length || !temChave()) return 0;
-  const campos = await extrairFichaDeArquivos(fichaImagens.map((b) => ({ base64: b, mime: 'image/png' })));
+// Prefere o PDF do processo (páginas reais, mais confiável que print);
+// se não houver, usa as imagens capturadas.
+async function ocrFichaParaServidor(servidorId, fichaImagens, numeroSei, pdfPath) {
+  if (!servidorId || !temChave()) return 0;
+  let arquivos = [];
+  if (pdfPath && existsSync(pdfPath)) {
+    try { arquivos = [{ base64: readFileSync(pdfPath).toString('base64'), mime: 'application/pdf' }]; } catch { /* */ }
+  }
+  if (!arquivos.length && fichaImagens?.length) {
+    arquivos = fichaImagens.map((b) => ({ base64: b, mime: 'image/png' }));
+  }
+  if (!arquivos.length) return 0;
+  const campos = await extrairFichaDeArquivos(arquivos, { numeroSei });
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(servidorId);
   if (!s) return 0;
   const cols = COLS_FICHA_SERV.filter((c) => campos[c] && (!s[c] || String(s[c]).trim() === ''));
@@ -451,9 +461,10 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
             aplicarDetalhe(item._proc, r, usuario);
             if (r.interessado) jobLote.novos++;
             // OCR automático da ficha -> preenche o servidor vinculado.
-            if (comFicha && r.fichaImagens?.length) {
+            if (comFicha && (r.fichaImagens?.length || r.pdfProcesso)) {
               const sid = db.prepare('SELECT servidor_id FROM processos WHERE id = ?').get(item._proc.id)?.servidor_id;
-              try { const n = await ocrFichaParaServidor(sid, r.fichaImagens); if (n) jobLote.fichas++; }
+              const pdfPath = r.pdfProcesso ? join(item.dir, r.pdfProcesso) : null;
+              try { const n = await ocrFichaParaServidor(sid, r.fichaImagens, item.numeroSei, pdfPath); if (n) jobLote.fichas++; }
               catch { /* OCR falhou neste processo; segue */ }
             }
           } catch { jobLote.erros++; }

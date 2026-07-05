@@ -332,8 +332,8 @@ export function limparNomeInteressado(bruto) {
   // precisa parecer nome: só letras/espaços/pontos/hífen, com pelo menos 2 palavras
   if (!/^[A-Za-zÀ-ú.'\- ]+$/.test(s)) return null;
   if (s.split(/\s+/).filter((w) => w.length > 1).length < 2) return null;
-  // ainda com cara de título de documento? descarta
-  if (/ASSENTAMENTO|PRONTU[AÁ]RIO|REQUERIMENTO|DESPACHO|OF[IÍ]CIO|MEMORANDO|CERTID[AÃ]O|PROCESSO\b/i.test(s)) return null;
+  // ainda com cara de título de documento/andamento? descarta.
+  if (/ASSENTAMENTO|PRONTU[AÁ]RIO|REQUERIMENTO|DESPACHO|OF[IÍ]CIO|MEMORANDO|CERTID[AÃ]O|PROCESSO\b|INFORMA[CÇ]|SOBRE\s+SERVIDOR|SERVIDOR\b|ANDAMENTO|ATRIBUI|NOTIFICA|COMUNICA|SOLICITA|ENCAMINHA|RELAT[OÓ]RIO|PARECER|MANIFESTA|\bSEI\b|CADASTR|FUNCIONAL/i.test(s)) return null;
   return s;
 }
 
@@ -356,7 +356,7 @@ export function vincularServidor(processoId, nome, cpf) {
 // Correção única dos dados já existentes: limpa nomes de interessado antigos
 // (assunto que virou "servidor" por engano) e reconstrói a lista de servidores
 // a partir dos nomes limpos. Preserva servidores com dados manuais/OCR.
-if (getConfig('interessados_limpos_v1') !== '1') {
+if (getConfig('interessados_limpos_v2') !== '1') {
   try {
     // 1) limpa o interessado dos processos
     const procs = db.prepare("SELECT id, interessado FROM processos WHERE interessado IS NOT NULL AND interessado <> ''").all();
@@ -375,7 +375,7 @@ if (getConfig('interessados_limpos_v1') !== '1') {
     // 4) reconstrói servidores a partir do interessado já limpo
     const rebuild = db.prepare("SELECT id, interessado FROM processos WHERE interessado IS NOT NULL AND interessado <> '' AND servidor_id IS NULL").all();
     for (const p of rebuild) { try { vincularServidor(p.id, p.interessado, null); } catch { /* ignora */ } }
-    setConfig('interessados_limpos_v1', '1');
+    setConfig('interessados_limpos_v2', '1');
   } catch { /* ignora */ }
 }
 

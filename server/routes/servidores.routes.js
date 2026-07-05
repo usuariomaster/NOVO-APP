@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import db, { ehSimulacao } from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import { descriptografar } from '../sei/crypto.js';
@@ -15,6 +15,7 @@ router.use(exigirLogin);
 router.use(exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_admin'));
 
 const DIR_PRONT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'prontuarios');
+const DIR_DOCS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'documentos');
 
 const CAMPOS = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao', 'secretaria', 'setor',
   'data_nascimento', 'sexo', 'data_admissao', 'vinculo', 'atividades', 'agentes_nocivos', 'observacoes',
@@ -108,18 +109,28 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     usuario: cfgRow.usuario, senha: descriptografar(cfgRow.senha_cripto),
   } : { base_url: process.env.SEI_BASE_URL || '' };
 
-  let imagens;
-  try {
-    const cap = await capturarFichaNoSei(cfg, { numeroSei: proc.numero_sei }, mock);
-    imagens = cap.imagens || [];
-    if (!imagens.length) return res.status(502).json({ erro: `Não encontrei a ficha no processo. ${cap.motivo || ''}`.trim() });
-  } catch (e) {
-    return res.status(502).json({ erro: `Erro ao abrir o processo no SEI: ${e.message}`, debug: e.debug || null });
+  // Fonte preferida: o PDF do processo já arquivado (páginas reais). Se não
+  // existir, captura as imagens da ficha ao vivo no SEI.
+  let arquivos = [];
+  let origem = '';
+  if (proc.pdf_processo) {
+    const pdfPath = join(DIR_DOCS, `proc-${proc.id}`, proc.pdf_processo);
+    if (existsSync(pdfPath)) { try { arquivos = [{ base64: readFileSync(pdfPath).toString('base64'), mime: 'application/pdf' }]; origem = 'PDF do processo'; } catch { /* */ } }
+  }
+  if (!arquivos.length) {
+    try {
+      const cap = await capturarFichaNoSei(cfg, { numeroSei: proc.numero_sei }, mock);
+      arquivos = (cap.imagens || []).map((b) => ({ base64: b, mime: 'image/png' }));
+      origem = 'imagens do SEI';
+      if (!arquivos.length) return res.status(502).json({ erro: `Não encontrei a ficha no processo. ${cap.motivo || ''}`.trim() });
+    } catch (e) {
+      return res.status(502).json({ erro: `Erro ao abrir o processo no SEI: ${e.message}`, debug: e.debug || null });
+    }
   }
 
   let campos;
   try {
-    campos = await extrairFichaDeArquivos(imagens.map((b) => ({ base64: b, mime: 'image/png' })));
+    campos = await extrairFichaDeArquivos(arquivos, { numeroSei: proc.numero_sei });
   } catch (e) {
     const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "Configuração da IA".' : e.message;
     return res.status(502).json({ erro: `OCR falhou: ${msg}` });
@@ -133,7 +144,7 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     db.prepare(`UPDATE servidores SET ${aGravar.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
       .run(...aGravar.map((c) => campos[c]), s.id);
   }
-  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, imagens: imagens.length });
+  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem });
 });
 
 // ---- Afastamentos (com CID) ----

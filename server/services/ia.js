@@ -102,26 +102,53 @@ const INSTRUCAO_FICHA =
   `"Secretaria"=secretaria (também lotacao), "Nº da Portaria"=num_portaria, ` +
   `"Data da Posse"=data_posse, "Data do Exercício"=data_exercicio, "Identidade"=identidade.`;
 
-// Mantém só as chaves conhecidas e não-vazias.
-function limparFicha(obj) {
+// Um valor com cara de NÚMERO DE PROCESSO SEI (ex.: 20708202031.001315/2026-82).
+function pareceNumeroProcesso(v) {
+  const s = String(v || '');
+  return /\/\s*(19|20)\d{2}\s*-\s*\d/.test(s) || /\d{5,}\.\d{4,}\/\d{4}/.test(s) || s.replace(/\D/g, '').length >= 14;
+}
+
+// Sanitiza os campos lidos para não gravar lixo — em especial impedir que o
+// NÚMERO DO PROCESSO entre como matrícula/CPF (são coisas diferentes).
+function limparFicha(obj, ctx = {}) {
+  const proc = String(ctx.numeroSei || '');
+  const procDigitos = proc.replace(/\D/g, '');
   const limpo = {};
   for (const c of CAMPOS_FICHA) {
-    const v = obj[c];
-    if (v !== undefined && v !== null && String(v).trim() !== '') limpo[c] = String(v).trim();
+    let v = obj[c];
+    if (v === undefined || v === null || String(v).trim() === '') continue;
+    v = String(v).trim();
+    // matrícula/identidade/CPF/NIT/PIS não podem ser o número do processo
+    if (['matricula', 'cpf', 'identidade', 'nit', 'pis_pasep', 'titulo_eleitor'].includes(c)) {
+      if (pareceNumeroProcesso(v)) continue;
+      const dig = v.replace(/\D/g, '');
+      if (procDigitos && dig && (dig === procDigitos || procDigitos.includes(dig) && dig.length >= 10)) continue;
+      if (c === 'cpf' && dig.length && dig.length !== 11) { if (dig.length < 11) continue; }
+    }
+    limpo[c] = v;
   }
   return limpo;
 }
 
+// Instrução extra para o OCR não confundir o nº do processo com matrícula.
+function avisoProcesso(numeroSei) {
+  if (!numeroSei) return '';
+  return `\n\nATENÇÃO: o número do PROCESSO SEI é "${numeroSei}". Ele NÃO é a matrícula nem o CPF. ` +
+    `A matrícula do servidor é um campo próprio da ficha (rótulo "Matrícula"), geralmente com poucos dígitos; ` +
+    `NÃO copie o número do processo para matrícula/CPF/identidade. Se não achar a matrícula na ficha, deixe vazio.`;
+}
+
 // A partir de TEXTO colado.
-export async function extrairFichaFuncional(texto) {
-  const prompt = `${INSTRUCAO_FICHA}\n\nFICHA FUNCIONAL:\n"""${String(texto).slice(0, 12000)}"""`;
+export async function extrairFichaFuncional(texto, ctx = {}) {
+  const prompt = `${INSTRUCAO_FICHA}${avisoProcesso(ctx.numeroSei)}\n\nFICHA FUNCIONAL:\n"""${String(texto).slice(0, 12000)}"""`;
   const obj = await chamarClaude({ system: SYSTEM_FICHA, prompt, maxTokens: 2000, json: true });
-  return limparFicha(obj);
+  return limparFicha(obj, ctx);
 }
 
 // A partir de ARQUIVO (imagem ou PDF) — OCR pela visão do Claude.
-// arquivos = [{ base64, mime }] (uma ou mais páginas/imagens).
-export async function extrairFichaDeArquivos(arquivos) {
+// arquivos = [{ base64, mime }] (uma ou mais páginas/imagens). ctx.numeroSei
+// evita que o robô confunda o número do processo com a matrícula.
+export async function extrairFichaDeArquivos(arquivos, ctx = {}) {
   const blocos = [];
   for (const a of arquivos.slice(0, 8)) {
     const mime = String(a.mime || '').toLowerCase();
@@ -135,9 +162,12 @@ export async function extrairFichaDeArquivos(arquivos) {
     }
   }
   if (!blocos.length) throw new Error('Nenhuma imagem/PDF válido para OCR.');
-  blocos.push({ type: 'text', text: `${INSTRUCAO_FICHA}\n\nLeia a(s) imagem(ns)/documento acima (ficha funcional do RH) e devolva o JSON.` });
+  blocos.push({ type: 'text', text:
+    `${INSTRUCAO_FICHA}${avisoProcesso(ctx.numeroSei)}\n\nLeia a(s) imagem(ns)/documento acima. ` +
+    `Só preencha um campo se ele estiver REALMENTE visível como ficha funcional (Dados Cadastrais do Funcionário). ` +
+    `Se a imagem não for uma ficha funcional, devolva um JSON vazio {}. Devolva SOMENTE o JSON.` });
   const obj = await chamarClaude({ system: SYSTEM_FICHA, content: blocos, maxTokens: 2000, json: true });
-  return limparFicha(obj);
+  return limparFicha(obj, ctx);
 }
 
 // ---- Gera PPP/LTCAT/PCMSO a partir do CBO e das atividades ----
