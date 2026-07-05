@@ -33,16 +33,16 @@ async function ocrFichaParaServidor(servidorId, fichaImagens, numeroSei, pdfPath
   if (!arquivos.length && fichaImagens?.length) {
     arquivos = fichaImagens.map((b) => ({ base64: b, mime: 'image/png' }));
   }
-  if (!arquivos.length) return 0;
-  const campos = await extrairFichaDeArquivos(arquivos, { numeroSei });
+  if (!arquivos.length) return { temFicha: null, preenchidos: 0 };
+  const { campos, temFicha } = await extrairFichaDeArquivos(arquivos, { numeroSei });
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(servidorId);
-  if (!s) return 0;
+  if (!s) return { temFicha, preenchidos: 0 };
   const cols = COLS_FICHA_SERV.filter((c) => campos[c] && (!s[c] || String(s[c]).trim() === ''));
   if (cols.length) {
     db.prepare(`UPDATE servidores SET ${cols.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
       .run(...cols.map((c) => campos[c]), s.id);
   }
-  return cols.length;
+  return { temFicha, preenchidos: cols.length };
 }
 
 // Monta a configuração do robô a partir da linha do banco (ou simulação).
@@ -315,14 +315,15 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
   try {
     r = await detalharProcessoNoSei(
       montarCfg(cfgRow),
-      { processoId: proc.id, numeroSei: proc.numero_sei, dir: dirProc, genPdf: cfgRow?.gerar_pdf === 1 },
+      { processoId: proc.id, numeroSei: proc.numero_sei, dir: dirProc, genPdf: cfgRow?.gerar_pdf !== 0, capturarFicha: temChave() },
       mock
     );
   } catch (e) {
     return res.status(502).json({ erro: e.message, debug: e.debug || null });
   }
 
-  // Atualiza os dados do processo (só sobrescreve o que veio preenchido).
+  // Atualiza os dados do processo (nome limpo; autuação é autoritativa).
+  const nome = limparNomeInteressado(r.interessado);
   db.prepare(
     `UPDATE processos SET
        tipo = COALESCE(?, tipo),
@@ -332,8 +333,22 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
        conteudo_em = datetime('now'),
        atualizado_em = datetime('now')
      WHERE id = ?`
-  ).run(r.tipo || null, r.interessado || null, r.especificacao || null, r.pdfProcesso || null, proc.id);
-  if (r.interessado) vincularServidor(proc.id, r.interessado, null);
+  ).run(r.tipo || null, nome, r.especificacao || null, r.pdfProcesso || null, proc.id);
+  if (nome) vincularServidor(proc.id, nome, null);
+
+  // OCR da ficha (preenche o servidor + marca se a ficha existe no processo).
+  let fichaMsg = '';
+  if (temChave()) {
+    const sid = db.prepare('SELECT servidor_id FROM processos WHERE id = ?').get(proc.id)?.servidor_id;
+    const pdfPath = r.pdfProcesso ? join(dirProc, r.pdfProcesso) : null;
+    if (sid && (pdfPath || r.fichaImagens?.length)) {
+      try {
+        const resF = await ocrFichaParaServidor(sid, r.fichaImagens, proc.numero_sei, pdfPath);
+        if (resF.temFicha === false) { db.prepare("UPDATE processos SET ficha_status = 'ausente' WHERE id = ?").run(proc.id); fichaMsg = ' ⚠️ sem ficha funcional'; }
+        else if (resF.temFicha === true) { db.prepare("UPDATE processos SET ficha_status = 'ok' WHERE id = ?").run(proc.id); fichaMsg = `, ficha lida (${resF.preenchidos} campo(s))`; }
+      } catch { /* segue */ }
+    }
+  }
 
   // Substitui a lista de documentos (com conteúdo/arquivo).
   let comPdf = 0;
@@ -377,7 +392,8 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
     pdfProcesso: r.pdfProcesso || null,
     comPdf,
     comTexto,
-    interessado: r.interessado || null,
+    fichaMsg,
+    interessado: nome || r.interessado || null,
     tipo: r.tipo || null,
     especificacao: r.especificacao || null,
     amostra: r.amostra || null,
@@ -442,7 +458,7 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
   // Por padrão também lê a ficha por OCR (o usuário quer tudo automático);
   // só roda o OCR se a chave da IA estiver configurada.
   const comFicha = req.body?.comFicha !== false && temChave();
-  jobLote = { rodando: true, total: alvos.length, feitos: 0, novos: 0, fichas: 0, erros: 0, atual: null, comFicha, iniciado: new Date().toISOString(), terminado: null };
+  jobLote = { rodando: true, total: alvos.length, feitos: 0, novos: 0, fichas: 0, semFicha: 0, erros: 0, atual: null, comFicha, iniciado: new Date().toISOString(), terminado: null };
   const usuario = req.usuario;
   const genPdf = cfgRow?.gerar_pdf === 1;
 
@@ -460,12 +476,17 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
           try {
             aplicarDetalhe(item._proc, r, usuario);
             if (r.interessado) jobLote.novos++;
-            // OCR automático da ficha -> preenche o servidor vinculado.
+            // OCR automático da ficha -> preenche o servidor vinculado e marca
+            // se a ficha funcional estava presente (flag no dashboard).
             if (comFicha && (r.fichaImagens?.length || r.pdfProcesso)) {
               const sid = db.prepare('SELECT servidor_id FROM processos WHERE id = ?').get(item._proc.id)?.servidor_id;
               const pdfPath = r.pdfProcesso ? join(item.dir, r.pdfProcesso) : null;
-              try { const n = await ocrFichaParaServidor(sid, r.fichaImagens, item.numeroSei, pdfPath); if (n) jobLote.fichas++; }
-              catch { /* OCR falhou neste processo; segue */ }
+              try {
+                const res = await ocrFichaParaServidor(sid, r.fichaImagens, item.numeroSei, pdfPath);
+                if (res.preenchidos) jobLote.fichas++;
+                if (res.temFicha === false) { jobLote.semFicha = (jobLote.semFicha || 0) + 1; db.prepare("UPDATE processos SET ficha_status = 'ausente' WHERE id = ?").run(item._proc.id); }
+                else if (res.temFicha === true) db.prepare("UPDATE processos SET ficha_status = 'ok' WHERE id = ?").run(item._proc.id);
+              } catch { /* OCR falhou neste processo; segue */ }
             }
           } catch { jobLote.erros++; }
         }

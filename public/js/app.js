@@ -437,7 +437,7 @@ async function buscarConteudoTodos() {
       if (!st.rodando) {
         clearInterval(timer);
         btn.disabled = false; btn.textContent = original;
-        const fichas = st.comFicha ? `, ${st.fichas || 0} ficha(s) por OCR` : '';
+        const fichas = st.comFicha ? `, ${st.fichas || 0} ficha(s) por OCR${st.semFicha ? `, ${st.semFicha} sem ficha ⚠️` : ''}` : '';
         toast(`Concluído: ${st.novos} com nome${fichas}, ${st.erros} com erro, de ${st.total}.`);
         carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value, document.getElementById('filtro-tipo')?.value || '');
       }
@@ -578,11 +578,16 @@ async function renderServidores() {
     <div class="toolbar"><input type="search" id="busca-serv" placeholder="Buscar nome, CPF, matrícula…"></div>
     <div class="card"><div id="lista-serv"></div></div>
   `);
+  const flagFicha = (s) => {
+    if (s.n_sem_ficha > 0) return ' <span class="badge pr-alta" style="font-size:11px" title="A ficha funcional não foi encontrada no processo">⚠️ sem ficha</span>';
+    if (!s.ficha_atualizada_em) return ' <span class="badge pr-normal" style="font-size:11px" title="Ficha ainda não lida — use Buscar conteúdo de todos">ficha pendente</span>';
+    return '';
+  };
   const desenha = (arr) => {
     document.getElementById('lista-serv').innerHTML = arr.length ? `<table>
       <thead><tr><th>Nome</th><th>Matrícula</th><th>Cargo</th><th>Processos</th><th>Afastamentos</th></tr></thead>
       <tbody>${arr.map((s) => `<tr data-id="${s.id}" style="cursor:pointer">
-        <td><b>${esc(s.nome)}</b><br><span class="muted">${esc(s.cpf || '')}</span></td>
+        <td><b>${esc(s.nome)}</b>${flagFicha(s)}<br><span class="muted">${esc(s.cpf || '')}</span></td>
         <td>${esc(s.matricula || '—')}</td><td>${esc(s.cargo || '—')}</td>
         <td>${s.n_processos}</td><td>${s.n_afastamentos}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty">Nenhum servidor. Eles são criados automaticamente ao buscar o conteúdo dos processos, ou cadastre manualmente.</div>';
@@ -1144,7 +1149,7 @@ function ligarAcoes(p, isOper, isPerito) {
         if (r.pdfProcesso) partes.push('PDF gerado (dá para consultar/imprimir)');
         else partes.push('sem PDF desta vez');
         if (!semMeta) partes.push('dados preenchidos');
-        toast(`Conteúdo atualizado: ${partes.join(', ')}.`);
+        toast(`Conteúdo atualizado: ${partes.join(', ')}${r.fichaMsg || ''}.`, /sem ficha/.test(r.fichaMsg || ''));
       } else {
         toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
       }

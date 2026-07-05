@@ -34,9 +34,10 @@ const CAMPOS = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao', 'secre
 router.get('/', (req, res) => {
   const q = req.query.q ? `%${req.query.q}%` : null;
   const linhas = db.prepare(
-    `SELECT s.*,
+    `SELECT s.id, s.nome, s.cpf, s.matricula, s.cargo, s.ficha_atualizada_em,
        (SELECT COUNT(*) FROM processos p WHERE p.servidor_id = s.id) AS n_processos,
-       (SELECT COUNT(*) FROM afastamentos a WHERE a.servidor_id = s.id) AS n_afastamentos
+       (SELECT COUNT(*) FROM afastamentos a WHERE a.servidor_id = s.id) AS n_afastamentos,
+       (SELECT COUNT(*) FROM processos p WHERE p.servidor_id = s.id AND p.ficha_status = 'ausente') AS n_sem_ficha
      FROM servidores s
      ${q ? 'WHERE s.nome LIKE ? OR s.cpf LIKE ? OR s.matricula LIKE ?' : ''}
      ORDER BY s.nome`
@@ -128,13 +129,16 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     }
   }
 
-  let campos;
+  let campos, temFicha;
   try {
-    campos = await extrairFichaDeArquivos(arquivos, { numeroSei: proc.numero_sei });
+    ({ campos, temFicha } = await extrairFichaDeArquivos(arquivos, { numeroSei: proc.numero_sei }));
   } catch (e) {
     const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "Configuração da IA".' : e.message;
     return res.status(502).json({ erro: `OCR falhou: ${msg}` });
   }
+
+  // Marca no processo se a ficha funcional estava presente (flag no dashboard).
+  db.prepare('UPDATE processos SET ficha_status = ? WHERE id = ?').run(temFicha === false ? 'ausente' : 'ok', proc.id);
 
   // Preenche APENAS os campos que estão vazios no cadastro (não sobrescreve o
   // que já foi conferido). Retorna também tudo que a IA leu, para a tela.
@@ -144,7 +148,7 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     db.prepare(`UPDATE servidores SET ${aGravar.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
       .run(...aGravar.map((c) => campos[c]), s.id);
   }
-  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem });
+  res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem, temFicha });
 });
 
 // ---- Afastamentos (com CID) ----

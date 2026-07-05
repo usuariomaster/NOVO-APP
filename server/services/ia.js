@@ -95,12 +95,17 @@ const SYSTEM_FICHA =
   'Devolva SOMENTE um objeto JSON, sem comentários. Use exatamente as chaves pedidas. ' +
   'Datas no formato AAAA-MM-DD. Se um campo não existir, use string vazia. Não invente dados.';
 const INSTRUCAO_FICHA =
-  `Extraia os campos abaixo da ficha funcional e devolva um JSON com estas chaves:\n` +
+  `Extraia os dados do servidor e devolva um JSON com estas chaves:\n` +
   CAMPOS_FICHA.join(', ') +
-  `\n\nMapeamento: "Unidade de Trabalho"=unidade_trabalho, ` +
+  `\n\nO processo costuma ter 3 fontes: a FICHA FUNCIONAL (Dados Cadastrais do Funcionário / RH), ` +
+  `o HOLERITE (contracheque) e a IDENTIDADE (RG). Cruze as três: pegue CPF e RG/identidade do documento de ` +
+  `identidade; matrícula, cargo e lotação do holerite/ficha. ` +
+  `Mapeamento: "Unidade de Trabalho"=unidade_trabalho, ` +
   `"Classificação Funcional"=classificacao_funcional (também pode preencher "cargo"/"funcao"), ` +
   `"Secretaria"=secretaria (também lotacao), "Nº da Portaria"=num_portaria, ` +
-  `"Data da Posse"=data_posse, "Data do Exercício"=data_exercicio, "Identidade"=identidade.`;
+  `"Data da Posse"=data_posse, "Data do Exercício"=data_exercicio, "Identidade"=identidade. ` +
+  `Inclua também a chave booleana "tem_ficha_funcional": true se houver a ficha de Dados Cadastrais do ` +
+  `Funcionário no material, false se NÃO houver (mesmo que haja holerite/identidade).`;
 
 // Um valor com cara de NÚMERO DE PROCESSO SEI (ex.: 20708202031.001315/2026-82).
 function pareceNumeroProcesso(v) {
@@ -138,11 +143,19 @@ function avisoProcesso(numeroSei) {
     `NÃO copie o número do processo para matrícula/CPF/identidade. Se não achar a matrícula na ficha, deixe vazio.`;
 }
 
-// A partir de TEXTO colado.
+// true/false do campo tem_ficha_funcional (default true quando veio conteúdo).
+function leuFicha(obj, campos) {
+  if (typeof obj.tem_ficha_funcional === 'boolean') return obj.tem_ficha_funcional;
+  // heurística: considera que tem ficha se leu campos tipicamente da ficha.
+  return ['matricula', 'cargo', 'classificacao_funcional', 'data_admissao', 'data_posse', 'lotacao'].some((c) => campos[c]);
+}
+
+// A partir de TEXTO colado. Retorna { campos, temFicha }.
 export async function extrairFichaFuncional(texto, ctx = {}) {
   const prompt = `${INSTRUCAO_FICHA}${avisoProcesso(ctx.numeroSei)}\n\nFICHA FUNCIONAL:\n"""${String(texto).slice(0, 12000)}"""`;
   const obj = await chamarClaude({ system: SYSTEM_FICHA, prompt, maxTokens: 2000, json: true });
-  return limparFicha(obj, ctx);
+  const campos = limparFicha(obj, ctx);
+  return { campos, temFicha: leuFicha(obj, campos) };
 }
 
 // A partir de ARQUIVO (imagem ou PDF) — OCR pela visão do Claude.
@@ -167,7 +180,8 @@ export async function extrairFichaDeArquivos(arquivos, ctx = {}) {
     `Só preencha um campo se ele estiver REALMENTE visível como ficha funcional (Dados Cadastrais do Funcionário). ` +
     `Se a imagem não for uma ficha funcional, devolva um JSON vazio {}. Devolva SOMENTE o JSON.` });
   const obj = await chamarClaude({ system: SYSTEM_FICHA, content: blocos, maxTokens: 2000, json: true });
-  return limparFicha(obj, ctx);
+  const campos = limparFicha(obj, ctx);
+  return { campos, temFicha: leuFicha(obj, campos) };
 }
 
 // ---- Gera PPP/LTCAT/PCMSO a partir do CBO e das atividades ----

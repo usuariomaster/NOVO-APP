@@ -217,6 +217,8 @@ if (getConfig('gerar_pdf_padrao_on') !== '1') {
 }
 // Data de entrada do processo na perícia (para prazos) e tipo da perícia
 garantirColuna('processos', 'data_entrada', 'data_entrada TEXT');
+// Situação da ficha funcional lida por OCR: 'ok' | 'ausente' | null (não tentado)
+garantirColuna('processos', 'ficha_status', 'ficha_status TEXT');
 
 // Servidor periciado (a pessoa dos processos) — vínculo com o processo
 garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');

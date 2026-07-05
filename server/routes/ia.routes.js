@@ -39,15 +39,15 @@ router.post('/testar', exigirPapel('admin', 'admin_master'), async (req, res) =>
 router.post('/extrair-ficha', exigirPapel('operador', 'admin', 'admin_master', 'perito', 'perito_admin'), async (req, res) => {
   const { texto, arquivos } = req.body || {};
   try {
-    let campos;
+    let out;
     if (Array.isArray(arquivos) && arquivos.length) {
-      campos = await extrairFichaDeArquivos(arquivos);
+      out = await extrairFichaDeArquivos(arquivos);
     } else if (texto && String(texto).trim().length >= 20) {
-      campos = await extrairFichaFuncional(texto);
+      out = await extrairFichaFuncional(texto);
     } else {
       return res.status(400).json({ erro: 'Cole o texto ou anexe uma imagem/PDF da ficha.' });
     }
-    res.json({ campos });
+    res.json({ campos: out.campos, temFicha: out.temFicha });
   } catch (e) {
     res.status(502).json({ erro: e.message });
   }
