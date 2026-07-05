@@ -892,16 +892,25 @@ async function renderProcessoDetalhe(id) {
   const isPerito = ehPerito();
 
   const docs = p.documentos.length
-    ? p.documentos.map((d) => `
+    ? p.documentos.map((d) => {
+        // Link para abrir o documento: PDF baixado > link direto no SEI.
+        const alvo = d.arquivo ? `/api/processos/${p.id}/documento/${d.id}/arquivo` : (d.link_sei || '');
+        const abrir = alvo
+          ? `<a class="btn secondary sm" href="${esc(alvo)}" target="_blank" rel="noopener">🔎 Abrir</a>`
+          : '';
+        const titulo = alvo
+          ? `<a href="${esc(alvo)}" target="_blank" rel="noopener" style="text-decoration:none"><b>${esc(d.tipo || 'Documento')}</b></a>`
+          : `<b>${esc(d.tipo || 'Documento')}</b>`;
+        return `
         <div style="padding:10px 0;border-bottom:1px solid var(--border)">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <b>${esc(d.tipo || 'Documento')}</b>
+            ${titulo}
             <span class="muted">${esc(d.numero || '')}</span>
-            ${d.arquivo ? `<a class="btn secondary sm" href="/api/processos/${p.id}/documento/${d.id}/arquivo" target="_blank" rel="noopener">📥 Baixar PDF</a>` : ''}
+            ${abrir}
             ${d.conteudo ? `<button class="btn secondary sm" data-toggle="doc-${d.id}">📄 Ver texto</button>` : ''}
           </div>
           ${d.conteudo ? `<div id="doc-${d.id}" style="display:none;white-space:pre-wrap;background:var(--surface-2);padding:12px;border-radius:8px;margin-top:8px;font-size:13px;max-height:320px;overflow:auto">${esc(d.conteudo)}</div>` : ''}
-        </div>`).join('')
+        </div>`; }).join('')
     : '<span class="muted">Nenhum documento. Use “Buscar conteúdo no SEI”.</span>';
 
   const timeline = p.historico.length
@@ -927,12 +936,11 @@ async function renderProcessoDetalhe(id) {
           <div class="card-h">Dados do processo ${isOper ? '<button class="btn secondary sm" id="btn-editar">Editar</button>' : ''}</div>
           <div class="card-b">
             <dl class="info-list">
-              <dt>Tipo</dt><dd>${esc(p.tipo || '—')}</dd>
-              <dt>Interessado</dt><dd>${esc(p.interessado || '—')}</dd>
-              <dt>Especificação</dt><dd>${esc(p.especificacao || '—')}</dd>
+              <dt>Servidor</dt><dd>${p.servidor_id ? `<a href="#servidor/${p.servidor_id}">${esc(p.interessado || '—')}</a>` : esc(p.interessado || '—')}</dd>
+              <dt>Assunto</dt><dd>${esc(p.especificacao || p.tipo || '—')}</dd>
+              <dt>Entrada no sistema</dt><dd>${dataBR(p.data_entrada)}</dd>
+              <dt>Encaminhado à perícia</dt><dd>${dataBR(p.data_encaminhado || p.data_autuacao)}</dd>
               <dt>Origem</dt><dd>${esc(p.unidade_origem || '—')}</dd>
-              <dt>Entrada na perícia</dt><dd>${esc(p.data_entrada || '—')}</dd>
-              <dt>Autuação (SEI)</dt><dd>${esc(p.data_autuacao || '—')}</dd>
               <dt>Perito</dt><dd>${esc(p.perito_nome || '—')}</dd>
               <dt>Prazo</dt><dd>${esc(p.prazo || '—')}</dd>
             </dl>
