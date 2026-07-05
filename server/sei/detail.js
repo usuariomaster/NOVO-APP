@@ -190,11 +190,25 @@ async function gerarPdfProcesso(page, dir, processoId) {
 // Tipo, Especificação e Interessados. Também devolve uma amostra da tela
 // para calibração remota.
 async function coletarMetadados(page) {
-  // 1) Tenta abrir a tela de dados do processo.
+  // 1) Abre a tela de dados do processo (autuação).
+  //    Primeiro clica no NÓ RAIZ da árvore (número do processo), que carrega
+  //    a barra de ações do processo; depois clica em "Consultar Dados do
+  //    Processo"/"Consultar Andamento" para chegar aos campos da autuação.
+  try {
+    const arvore = await acharArvore(page);
+    if (arvore) {
+      const raiz = arvore.locator('a').filter({ hasText: /\d{3}.*\/\d{4}|\d{5,}/ }).first();
+      if (await raiz.count()) {
+        await raiz.click({ timeout: 8000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => {});
+        await page.waitForTimeout(1000);
+      }
+    }
+  } catch { /* segue */ }
   try {
     for (const f of page.frames()) {
       const link = f
-        .locator('a[href*="procedimento_alterar"], a[href*="procedimento_consultar"], img[title*="Consultar/Alterar Processo"], img[title*="Consultar Processo"]')
+        .locator('a[href*="procedimento_alterar"], a[href*="procedimento_consultar"], a[href*="procedimento_visualizar"], img[title*="Consultar Dados do Processo"], img[title*="Consultar/Alterar Processo"], img[title*="Consultar Processo"], a[title*="Consultar Dados do Processo"]')
         .first();
       if (await link.count()) {
         await link.click({ timeout: 10000 });

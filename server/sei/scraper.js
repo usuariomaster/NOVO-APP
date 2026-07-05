@@ -127,7 +127,7 @@ function processosDeExemplo() {
 
 // Faz login e retorna a página/contexto autenticados.
 export async function autenticar(browser, cfg) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, acceptDownloads: true });
   const page = await context.newPage();
 
   const baseUrl = (cfg.base_url || '').replace(/\/+$/, '');

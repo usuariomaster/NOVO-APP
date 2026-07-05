@@ -1127,19 +1127,24 @@ function ligarAcoes(p, isOper, isPerito) {
       const box = (titulo, t) => t
         ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
            <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(t)}</textarea>` : '';
-      // No SEI real, se faltou o interessado/assunto ou o PDF, mostra a amostra pra calibrar.
-      if (r.modo === 'sei' && (semMeta || !r.pdfProcesso)) {
+      // Só mostra a calibração quando NÃO veio NEM o PDF NEM os dados — aí
+      // realmente não deu pra aproveitar nada. Se o PDF veio, é sucesso.
+      if (r.modo === 'sei' && semMeta && !r.pdfProcesso) {
         await modal({
-          titulo: 'Calibração — copie o texto e mande ao suporte',
+          titulo: 'Não consegui ler os dados nem gerar o PDF',
           okLabel: 'Fechar',
-          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s)${r.pdfProcesso ? ' + PDF' : ''}, mas ${semMeta ? 'não li os dados (interessado/assunto)' : 'não gerei o PDF'}.</p>
-            <p class="muted">👉 Clique no quadro, <b>Ctrl+A</b>, copie e <b>cole no chat do suporte</b>:</p>
+          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s), mas não li os dados (interessado/assunto) nem gerei o PDF.</p>
+            <p class="muted">👉 Clique no quadro, <b>Ctrl+A</b>, copie e <b>cole aqui no chat</b> para eu calibrar:</p>
             ${box('Campos da autuação (interessado/assunto):', r.amostraMeta)}
             ${box('Tela do processo:', r.amostra)}
             ${!r.amostraMeta && !r.amostra ? '<i>Sem amostra desta vez.</i>' : ''}`,
         });
       } else if (r.modo === 'sei') {
-        toast(`Conteúdo atualizado: ${r.documentos} doc(s), dados preenchidos.`);
+        const partes = [`${r.documentos} doc(s)`];
+        if (r.pdfProcesso) partes.push('PDF gerado (dá para consultar/imprimir)');
+        else partes.push('sem PDF desta vez');
+        if (!semMeta) partes.push('dados preenchidos');
+        toast(`Conteúdo atualizado: ${partes.join(', ')}.`);
       } else {
         toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
       }
@@ -1646,7 +1651,7 @@ async function renderConfigSei() {
         <div class="field"><label>Enviar processo à unidade (opcional)</label><input name="unidade_destino" placeholder="ex.: SEMUS ou sigla da unidade de destino"></div>
         <div class="field"><label><input type="checkbox" name="assinar" checked style="width:auto"> Assinar o despacho no SEI automaticamente (com a senha do SEI)</label></div>
         <div class="field"><label>Cargo/Função para assinatura (se o SEI pedir)</label><input name="cargo" placeholder="ex.: Perito Médico"></div>
-        <div class="field"><label><input type="checkbox" name="gerar_pdf" style="width:auto"> Gerar PDF do processo inteiro ao buscar conteúdo (mais lento; por padrão salvamos só os metadados)</label></div>`,
+        <div class="field"><label><input type="checkbox" name="gerar_pdf" checked style="width:auto"> Gerar PDF do processo inteiro ao buscar conteúdo (recomendado — permite consultar/imprimir/arquivar; deixe marcado)</label></div>`,
     });
     if (!r) return;
     try { await api.post('/api/sei/config', { ...r, padrao: 1, assinar: !!r.assinar, gerar_pdf: !!r.gerar_pdf }); toast('Configuração salva'); renderConfigSei(); }

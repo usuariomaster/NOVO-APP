@@ -207,9 +207,14 @@ garantirColuna('sei_config', 'unidade_destino', 'unidade_destino TEXT');
 // Assinatura nativa do SEI (assina o despacho com a senha do SEI)
 garantirColuna('sei_config', 'assinar', 'assinar INTEGER NOT NULL DEFAULT 1');
 garantirColuna('sei_config', 'cargo', 'cargo TEXT');
-// Gerar o PDF do processo inteiro ao buscar conteúdo (pesado). Padrão: não
-// (arquivamos os metadados + documentos, que é mais leve).
-garantirColuna('sei_config', 'gerar_pdf', 'gerar_pdf INTEGER NOT NULL DEFAULT 0');
+// Gerar o PDF do processo inteiro ao buscar conteúdo — LIGADO por padrão,
+// para permitir consultar/imprimir/arquivar o processo.
+garantirColuna('sei_config', 'gerar_pdf', 'gerar_pdf INTEGER NOT NULL DEFAULT 1');
+// Migração única: liga o PDF nas configurações já existentes (antes era 0).
+if (getConfig('gerar_pdf_padrao_on') !== '1') {
+  try { db.prepare('UPDATE sei_config SET gerar_pdf = 1').run(); } catch { /* ignora */ }
+  setConfig('gerar_pdf_padrao_on', '1');
+}
 // Data de entrada do processo na perícia (para prazos) e tipo da perícia
 garantirColuna('processos', 'data_entrada', 'data_entrada TEXT');
 
