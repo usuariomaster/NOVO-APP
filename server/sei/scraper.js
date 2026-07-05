@@ -363,74 +363,77 @@ async function unidadeAtual(page) {
   return null;
 }
 
-// Abre o "Trocar Unidade" e lista as unidades que o usuário pode acessar.
-// Retorna { unidades:[{nome,href}], debug } — debug é uma amostra da tela.
-//
-// No SEI 4.x o indicador da unidade fica no topo (rodapé do cabeçalho) como
-// um link com o nome/sigla da unidade. Clicar nele abre a tela "Selecionar
-// Unidade", que é uma TABELA: cada linha tem um link com a sigla cujo
-// onclick/href chama infraTrocarUnidade(id) ou acao=infra_unidade_alterar.
-async function listarUnidades(page, nomeAtual) {
-  const seletores = [
-    '#lnkInfraUnidade',
-    'a[href*="infra_unidade_alterar"]',
-    'a[href*="infra_trocar_unidade"]',
-    'a[onclick*="infraTrocarUnidade"]',
-    'a[onclick*="trocar_unidade"]',
-    'a[href*="infra_unidade_trocar"]',
-    'a[title*="Alterar Unidade"]',
-    'a[title*="unidade"]',
-  ];
-  let abriu = false;
+// Seletores do controle "Alterar Unidade" no topo do SEI 4.x.
+const SEL_UNIDADE = [
+  '#lnkInfraUnidade',
+  'a[href*="infra_unidade_alterar"]',
+  'a[href*="infra_trocar_unidade"]',
+  'a[onclick*="infraAbrirJanelaSelecaoUnidade"]',
+  'a[onclick*="infraTrocarUnidade"]',
+  'a[onclick*="SelecaoUnidade"]',
+  'a[title*="Alterar Unidade"]',
+  'img[title*="Alterar Unidade"]',
+  'a[title*="unidade"]',
+];
+
+// Clica no controle de troca de unidade. O SEL pode abrir a seleção NA MESMA
+// página (frameset) ou numa JANELA/POPUP. Retorna a "tela" onde a lista de
+// unidades aparece (a própria page ou o popup), ou null se não achou o botão.
+async function abrirSelecaoUnidade(page, context, nomeAtual) {
+  const clicarEEsperar = async (locator) => {
+    const [popup] = await Promise.all([
+      context.waitForEvent('page', { timeout: 3500 }).catch(() => null),
+      locator.click({ timeout: 6000 }).catch(() => null),
+    ]);
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    if (popup) { await popup.waitForLoadState('domcontentloaded').catch(() => {}); return popup; }
+    return page;
+  };
+  // 1) Botões/links conhecidos.
   for (const f of page.frames()) {
-    for (const sel of seletores) {
+    for (const sel of SEL_UNIDADE) {
       try {
         const link = f.locator(sel).first();
-        if (await link.count()) { await link.click({ timeout: 8000 }); abriu = true; break; }
-      } catch { /* tenta o próximo seletor */ }
+        if (await link.count()) return await clicarEEsperar(link);
+      } catch { /* próximo */ }
     }
-    if (abriu) break;
   }
-  // Último recurso: clicar no próprio texto da unidade atual no cabeçalho.
-  if (!abriu && nomeAtual) {
+  // 2) Chama a função JS do SEI diretamente.
+  for (const f of page.frames()) {
+    try {
+      const chamou = await f.evaluate(() => {
+        for (const fn of ['infraAbrirJanelaSelecaoUnidade', 'infraTrocarUnidade']) {
+          if (typeof window[fn] === 'function') { try { window[fn](); return true; } catch { /* */ } }
+        }
+        return false;
+      });
+      if (chamou) {
+        const popup = await context.waitForEvent('page', { timeout: 3500 }).catch(() => null);
+        await page.waitForTimeout(1000);
+        if (popup) { await popup.waitForLoadState('domcontentloaded').catch(() => {}); return popup; }
+        return page;
+      }
+    } catch { /* ignora */ }
+  }
+  // 3) Último recurso: clicar no texto da unidade atual no cabeçalho.
+  if (nomeAtual) {
     for (const f of page.frames()) {
       try {
         const link = f.locator(`a:has-text("${nomeAtual}")`).first();
-        if (await link.count()) { await link.click({ timeout: 8000 }); abriu = true; break; }
+        if (await link.count()) return await clicarEEsperar(link);
       } catch { /* ignora */ }
     }
   }
-  if (!abriu) {
-    // Não achei o botão de troca — dumpa o topo/cabeçalho de cada frame para
-    // eu descobrir qual é o elemento certo de "Alterar Unidade".
-    let dump = 'Não encontrei o botão "Alterar Unidade". Elementos candidatos no topo do SEI:\n\n';
-    for (const f of page.frames()) {
-      try {
-        const els = await f.$$eval('a, span, div, td, input, button', (nodes) =>
-          nodes.map((n) => ({
-            tag: n.tagName.toLowerCase(),
-            id: n.id || '',
-            t: (n.textContent || n.getAttribute?.('value') || '').trim().slice(0, 60),
-            h: (n.getAttribute?.('href') || '').slice(0, 90),
-            o: (n.getAttribute?.('onclick') || '').slice(0, 90),
-            ti: (n.getAttribute?.('title') || '').slice(0, 60),
-          })).filter((x) => /unidad|SEMUS|PERÍCIA|PERICIA|infraUnidade|lnkInfra/i.test(`${x.id} ${x.t} ${x.h} ${x.o} ${x.ti}`))
-        );
-        if (els.length) {
-          dump += `--- ${f.url().slice(0, 70)} ---\n` +
-            els.slice(0, 25).map((e) => `<${e.tag}${e.id ? ' id=' + e.id : ''}> "${e.t}" title="${e.ti}" ${e.h || e.o}`).join('\n') + '\n\n';
-        }
-      } catch { /* ignora */ }
-    }
-    return { unidades: [], debug: dump.slice(0, 6000) };
-  }
-  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(1200);
+  return null;
+}
 
+// Lê as unidades disponíveis da tela de seleção (page ou popup).
+async function parsearUnidades(tela) {
   let debug = '';
   const unidades = [];
   const vistos = new Set();
-  for (const f of page.frames()) {
+  for (const f of tela.frames()) {
     let anchors = [];
     try {
       anchors = await f.$$eval('a', (els) =>
@@ -447,12 +450,10 @@ async function listarUnidades(page, nomeAtual) {
       anchors.slice(0, 80).map((a) => `${a.t}  =>  ${a.h || a.o}`).join('\n') + '\n\n';
     for (const a of anchors) {
       const alvo = `${a.h} ${a.o} ${a.abs}`;
-      const pareceTroca = /infraTrocarUnidade|infra_unidade_alterar|trocar_unidade|id_unidade|unidade_trocar|unidade_alterar/i.test(alvo);
-      // O nome/sigla da unidade costuma ser curto e com letras (ex.: "SEMUS - PERÍCIA").
+      const pareceTroca = /infraTrocarUnidade|infra_unidade_alterar|trocar_unidade|id_unidade|unidade_trocar|unidade_alterar|selecionar_unidade/i.test(alvo);
       const pareceNome = a.t && a.t.length >= 2 && a.t.length <= 70 && /[A-Za-zÀ-ú]/.test(a.t);
       if (pareceTroca && pareceNome && !vistos.has(a.t)) {
         vistos.add(a.t);
-        // extrai o id_unidade quando existir (para troca direta e confiável)
         const m = alvo.match(/infraTrocarUnidade\((\d+)/i) || alvo.match(/id_unidade=(\d+)/i);
         unidades.push({ nome: a.t, href: /^https?:/.test(a.abs) ? a.abs : '', id: m ? m[1] : null });
       }
@@ -461,30 +462,69 @@ async function listarUnidades(page, nomeAtual) {
   return { unidades, debug: debug.slice(0, 6000) };
 }
 
-// Troca para a unidade informada. Tenta, em ordem: (1) o link exato da sigla
-// na tabela de seleção, (2) navegação direta por id_unidade, (3) href absoluto.
-async function trocarUnidade(page, unidade, baseUrl) {
+// Dump de diagnóstico do topo do SEI quando não achamos o botão de unidade.
+async function dumpTopoUnidade(page) {
+  let dump = 'Não encontrei o botão "Alterar Unidade". Elementos candidatos no topo do SEI:\n\n';
   for (const f of page.frames()) {
     try {
-      const link = f.locator(`a:has-text("${unidade.nome}")`).first();
-      if (await link.count()) {
-        await link.click({ timeout: 10000 });
-        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-        await page.waitForTimeout(1200);
-        return true;
+      const els = await f.$$eval('a, span, div, td, input, button', (nodes) =>
+        nodes.map((n) => ({
+          tag: n.tagName.toLowerCase(), id: n.id || '',
+          t: (n.textContent || n.getAttribute?.('value') || '').trim().slice(0, 60),
+          h: (n.getAttribute?.('href') || '').slice(0, 90),
+          o: (n.getAttribute?.('onclick') || '').slice(0, 90),
+          ti: (n.getAttribute?.('title') || '').slice(0, 60),
+        })).filter((x) => /unidad|SEMUS|PERÍCIA|PERICIA|infraUnidade|lnkInfra|protocolo/i.test(`${x.id} ${x.t} ${x.h} ${x.o} ${x.ti}`))
+      );
+      if (els.length) {
+        dump += `--- ${f.url().slice(0, 70)} ---\n` +
+          els.slice(0, 30).map((e) => `<${e.tag}${e.id ? ' id=' + e.id : ''}> "${e.t}" title="${e.ti}" ${e.h || e.o}`).join('\n') + '\n\n';
       }
-    } catch { /* tenta o próximo quadro */ }
+    } catch { /* ignora */ }
   }
+  return dump.slice(0, 6000);
+}
+
+// Descobre as unidades disponíveis (abre a seleção, lê e fecha o popup).
+async function listarUnidades(page, context, nomeAtual) {
+  const tela = await abrirSelecaoUnidade(page, context, nomeAtual);
+  if (!tela) return { unidades: [], debug: await dumpTopoUnidade(page) };
+  const { unidades, debug } = await parsearUnidades(tela);
+  if (tela !== page) { await tela.close().catch(() => {}); }
+  return { unidades, debug };
+}
+
+// Troca para a unidade: reabre a seleção e clica na unidade (por id ou nome).
+// Fallback: navegação direta por id_unidade.
+async function trocarUnidade(page, context, unidade, baseUrl) {
+  const tela = await abrirSelecaoUnidade(page, context, null);
+  if (tela) {
+    for (const f of tela.frames()) {
+      try {
+        let link = null;
+        if (unidade.id) {
+          link = f.locator(`a[onclick*="infraTrocarUnidade(${unidade.id}"], a[onclick*="infraTrocarUnidade(${unidade.id})"], a[href*="id_unidade=${unidade.id}"]`).first();
+          if (!(await link.count())) link = null;
+        }
+        if (!link) link = f.locator(`a:has-text("${unidade.nome}")`).first();
+        if (await link.count()) {
+          await Promise.all([
+            page.waitForNavigation({ timeout: 12000 }).catch(() => {}),
+            link.click({ timeout: 8000 }).catch(() => {}),
+          ]);
+          await page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => {});
+          await page.waitForTimeout(1200);
+          if (tela !== page) await tela.close().catch(() => {});
+          return true;
+        }
+      } catch { /* próximo quadro */ }
+    }
+    if (tela !== page) await tela.close().catch(() => {});
+  }
+  // Fallback: troca direta por id_unidade (a sessão já está autenticada).
   if (unidade.id && baseUrl) {
     try {
       await page.goto(`${baseUrl}/controlador.php?acao=infra_unidade_alterar&id_unidade=${unidade.id}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(1200);
-      return true;
-    } catch { /* ignora */ }
-  }
-  if (unidade.href) {
-    try {
-      await page.goto(unidade.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(1200);
       return true;
     } catch { /* ignora */ }
@@ -518,19 +558,27 @@ export async function extrairProcessos(cfg, mock) {
     for (const p of r1.processos) todos.push(p);
     porUnidade[nomeAtual] = r1.processos.length;
 
-    // 2) Demais unidades permitidas.
-    const { unidades, debug: debugUnidades } = await listarUnidades(page, nomeAtual);
+    // 2) Demais unidades permitidas — o robô troca de unidade sozinho.
+    const { unidades, debug: debugUnidades } = await listarUnidades(page, auth.context, nomeAtual);
     const resumoUnidades = `Unidade atual: ${nomeAtual}\nEncontradas: ${unidades.map((u) => u.nome + (u.id ? ` (#${u.id})` : '')).join(' | ') || '(nenhuma)'}\n\n${debugUnidades}`;
     try { fs.writeFileSync(join(DIR_DIAG, 'debug-unidades.txt'), resumoUnidades, 'utf8'); } catch { /* ignora */ }
+    // Deduplica número de processo já visto (nunca traz duplicidade entre unidades).
+    const jaVistos = new Set(todos.map((p) => p.numero_sei));
     for (const u of unidades) {
       if (u.nome === nomeAtual) continue;
-      const ok = await trocarUnidade(page, u, auth.baseUrl);
+      const ok = await trocarUnidade(page, auth.context, u, auth.baseUrl);
       if (!ok) continue;
       // depois de trocar, volta ao Controle de Processos da nova unidade
       await clicarControle(page);
       const r = await extrairControleProcessos(page, u.nome);
-      for (const p of r.processos) todos.push(p);
-      porUnidade[u.nome] = (porUnidade[u.nome] || 0) + r.processos.length;
+      let novosU = 0;
+      for (const p of r.processos) {
+        if (jaVistos.has(p.numero_sei)) continue;
+        jaVistos.add(p.numero_sei);
+        todos.push(p);
+        novosU++;
+      }
+      porUnidade[u.nome] = (porUnidade[u.nome] || 0) + novosU;
     }
 
     const debug = await salvarDiagnostico(page, 'debug-controle');

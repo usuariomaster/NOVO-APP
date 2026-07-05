@@ -422,7 +422,7 @@ async function carregarLista(q, status, tipo) {
 // acompanha o progresso.
 async function buscarConteudoTodos() {
   const btn = document.getElementById('btn-conteudo-todos');
-  if (!confirm('Buscar no SEI o conteúdo de todos os processos que ainda estão sem nome/assunto?\n\nIsso abre cada processo no robô e pode levar alguns minutos. Você pode continuar usando o sistema.')) return;
+  if (!confirm('Buscar no SEI o conteúdo de todos os processos que ainda estão sem nome/assunto?\n\nO robô abre cada processo, lê nome/assunto/documentos e — se a IA estiver configurada — captura a ficha funcional por OCR e preenche o cadastro do servidor sozinho.\n\nPode levar alguns minutos. Você pode continuar usando o sistema.')) return;
   btn.disabled = true;
   const original = btn.textContent;
   try {
@@ -437,7 +437,8 @@ async function buscarConteudoTodos() {
       if (!st.rodando) {
         clearInterval(timer);
         btn.disabled = false; btn.textContent = original;
-        toast(`Concluído: ${st.novos} com nome, ${st.erros} com erro, de ${st.total}.`);
+        const fichas = st.comFicha ? `, ${st.fichas || 0} ficha(s) por OCR` : '';
+        toast(`Concluído: ${st.novos} com nome${fichas}, ${st.erros} com erro, de ${st.total}.`);
         carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value, document.getElementById('filtro-tipo')?.value || '');
       }
     }, 2500);

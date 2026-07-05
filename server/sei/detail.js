@@ -298,8 +298,8 @@ async function screenshotConteudo(page) {
   } catch { return null; }
 }
 
-async function capturarFichaDoProcesso(page, baseUrl, numeroSei) {
-  await abrirProcesso(page, baseUrl, numeroSei);
+// Captura a ficha a partir de um processo JÁ ABERTO (reaproveita a navegação).
+async function capturarFichaImagens(page) {
   const arvore = await acharArvore(page);
   if (!arvore) return { imagens: [], motivo: 'Árvore de documentos não encontrada.' };
 
@@ -329,6 +329,12 @@ async function capturarFichaDoProcesso(page, baseUrl, numeroSei) {
     } catch { /* tenta o próximo */ }
   }
   return { imagens, rotulos, motivo: imagens.length ? null : 'Não consegui capturar o conteúdo dos documentos.' };
+}
+
+// Abre o processo e captura a ficha (usado no botão avulso do servidor).
+async function capturarFichaDoProcesso(page, baseUrl, numeroSei) {
+  await abrirProcesso(page, baseUrl, numeroSei);
+  return await capturarFichaImagens(page);
 }
 
 // API: abre o processo e devolve as imagens (PNG base64) da ficha para OCR.
@@ -390,13 +396,19 @@ async function detalharNaPagina(page, baseUrl, dados) {
   const documentos = await coletarDocumentos(page);
   const amostra = await coletarAmostra(page);
   const debug = await salvarDiagnostico(page, `debug-processo`);
+  // Captura a ficha funcional (imagens) enquanto o processo está aberto —
+  // para o OCR automático preencher o cadastro do servidor sem interação.
+  let fichaImagens = [];
+  if (dados.capturarFicha) {
+    try { const cap = await capturarFichaImagens(page); fichaImagens = cap.imagens || []; } catch { /* ignora */ }
+  }
   let pdfProcesso = null;
   if (dados.dir && dados.genPdf) {
     pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
   }
   const meta = await coletarMetadados(page);
   const amostraMeta = meta._amostra; delete meta._amostra;
-  return { modo: 'sei', ...meta, documentos, pdfProcesso, amostra, amostraMeta, debug };
+  return { modo: 'sei', ...meta, documentos, pdfProcesso, fichaImagens, amostra, amostraMeta, debug };
 }
 
 // Detalha VÁRIOS processos reaproveitando UMA sessão/navegador (bem mais

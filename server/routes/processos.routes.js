@@ -9,6 +9,31 @@ import { lancarDespachoNoSei } from '../sei/writer.js';
 import { detalharProcessoNoSei, detalharVariosNoSei } from '../sei/detail.js';
 import { htmlDespacho } from '../services/htmlDespacho.js';
 import { htmlParaPdfAssinado } from '../services/assinarPdf.js';
+import { temChave, extrairFichaDeArquivos } from '../services/ia.js';
+
+// Colunas da ficha do servidor que o OCR pode preencher (só as vazias).
+const COLS_FICHA_SERV = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao', 'secretaria', 'setor',
+  'data_nascimento', 'sexo', 'data_admissao', 'vinculo', 'pai', 'mae', 'grau_instrucao', 'naturalidade',
+  'uf_naturalidade', 'nacionalidade', 'estado_civil', 'identidade', 'identidade_emissao', 'identidade_orgao',
+  'titulo_eleitor', 'zona', 'secao', 'ctps', 'ctps_serie', 'ctps_uf', 'nit', 'pis_pasep', 'situacao',
+  'data_demissao', 'tipo_admissao', 'data_publicacao', 'num_portaria', 'data_concurso', 'data_posse',
+  'data_exercicio', 'tipo_salario', 'regime_previdencia', 'carga_horaria', 'vinculo_empregaticio',
+  'unidade_trabalho', 'classificacao_funcional', 'simbologia', 'cbo', 'cbo_mt', 'endereco', 'numero_ende',
+  'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email'];
+
+// Preenche a ficha do servidor com o que o OCR leu — só os campos vazios.
+async function ocrFichaParaServidor(servidorId, fichaImagens) {
+  if (!servidorId || !fichaImagens?.length || !temChave()) return 0;
+  const campos = await extrairFichaDeArquivos(fichaImagens.map((b) => ({ base64: b, mime: 'image/png' })));
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(servidorId);
+  if (!s) return 0;
+  const cols = COLS_FICHA_SERV.filter((c) => campos[c] && (!s[c] || String(s[c]).trim() === ''));
+  if (cols.length) {
+    db.prepare(`UPDATE servidores SET ${cols.map((c) => `${c} = ?`).join(', ')}, ficha_atualizada_em = datetime('now') WHERE id = ?`)
+      .run(...cols.map((c) => campos[c]), s.id);
+  }
+  return cols.length;
+}
 
 // Monta a configuração do robô a partir da linha do banco (ou simulação).
 function montarCfg(cfgRow) {
@@ -398,7 +423,10 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
   ).all();
   if (!alvos.length) return res.json({ ok: true, total: 0, mensagem: 'Nada a buscar — todos já têm conteúdo.' });
 
-  jobLote = { rodando: true, total: alvos.length, feitos: 0, novos: 0, erros: 0, atual: null, iniciado: new Date().toISOString(), terminado: null };
+  // Por padrão também lê a ficha por OCR (o usuário quer tudo automático);
+  // só roda o OCR se a chave da IA estiver configurada.
+  const comFicha = req.body?.comFicha !== false && temChave();
+  jobLote = { rodando: true, total: alvos.length, feitos: 0, novos: 0, fichas: 0, erros: 0, atual: null, comFicha, iniciado: new Date().toISOString(), terminado: null };
   const usuario = req.usuario;
   const genPdf = cfgRow?.gerar_pdf === 1;
 
@@ -406,15 +434,23 @@ router.post('/detalhar-todos', exigirPapel('operador', 'admin'), (req, res) => {
     const itens = alvos.map((p) => {
       const dirProc = join(DIR_DOCS, `proc-${p.id}`);
       try { mkdirSync(dirProc, { recursive: true }); } catch { /* ignora */ }
-      return { processoId: p.id, numeroSei: p.numero_sei, dir: dirProc, genPdf, _proc: p };
+      return { processoId: p.id, numeroSei: p.numero_sei, dir: dirProc, genPdf, capturarFicha: comFicha, _proc: p };
     });
     try {
-      await detalharVariosNoSei(montarCfg(cfgRow), itens, mock, (idx, item, r, err) => {
+      await detalharVariosNoSei(montarCfg(cfgRow), itens, mock, async (idx, item, r, err) => {
         jobLote.atual = item.numeroSei;
         if (err) { jobLote.erros++; }
         else {
-          try { aplicarDetalhe(item._proc, r, usuario); if (r.interessado) jobLote.novos++; }
-          catch { jobLote.erros++; }
+          try {
+            aplicarDetalhe(item._proc, r, usuario);
+            if (r.interessado) jobLote.novos++;
+            // OCR automático da ficha -> preenche o servidor vinculado.
+            if (comFicha && r.fichaImagens?.length) {
+              const sid = db.prepare('SELECT servidor_id FROM processos WHERE id = ?').get(item._proc.id)?.servidor_id;
+              try { const n = await ocrFichaParaServidor(sid, r.fichaImagens); if (n) jobLote.fichas++; }
+              catch { /* OCR falhou neste processo; segue */ }
+            }
+          } catch { jobLote.erros++; }
         }
         jobLote.feitos++;
       });
