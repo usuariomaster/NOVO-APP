@@ -488,11 +488,24 @@ async function extrairDoSei() {
           <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.unidadesDebug)}</textarea>
         </details>`;
       }
+      // Diagnóstico do interessado: se poucos nomes vieram na lista, mostra os
+      // atributos das linhas para eu calibrar (opção B).
+      let diagInt = '';
+      if (r.modo === 'sei' && typeof r.comNome === 'number' && r.comNome < r.total && r.interessadosDebug) {
+        diagInt = `<details style="margin-top:12px">
+          <summary style="cursor:pointer;color:var(--muted)">🔎 Diagnóstico do nome (interessado) na lista</summary>
+          <p class="muted" style="margin:8px 0 4px">Vieram <b>${r.comNome}</b> de <b>${r.total}</b> com nome direto na lista.
+          Se ficou baixo, <b>copie o texto abaixo e me mande</b> — assim eu leio o nome já na extração:</p>
+          <textarea readonly style="height:180px;font-family:ui-monospace,monospace;font-size:12px">${esc(r.interessadosDebug)}</textarea>
+        </details>`;
+      }
+      const resumoNome = typeof r.comNome === 'number' ? ` <span class="muted">(${r.comNome} com nome na lista)</span>` : '';
       await modal({
         titulo: 'Extração concluída',
         okLabel: 'Ver processos',
-        corpo: `<p><b>${r.novos}</b> novo(s) e <b>${r.ignorados}</b> já existente(s).</p>
-          <p class="muted">De onde vieram:</p><ul style="margin:0;padding-left:18px">${linhas}</ul>${diag}`,
+        corpo: `<p><b>${r.novos}</b> novo(s) e <b>${r.ignorados}</b> já existente(s).${resumoNome}</p>
+          <p class="muted" style="margin-top:6px">Dica: use <b>"🔎 Buscar conteúdo de todos"</b> para completar nome, assunto e documentos que não vieram na lista.</p>
+          <p class="muted">De onde vieram:</p><ul style="margin:0;padding-left:18px">${linhas}</ul>${diag}${diagInt}`,
       });
     } else {
       toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);

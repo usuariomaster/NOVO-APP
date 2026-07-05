@@ -158,21 +158,51 @@ export async function autenticar(browser, cfg) {
 }
 
 // Coleta os links de processo dentro de UM frame (tolerante a erros).
+// Também tenta capturar o INTERESSADO: no SEI ele aparece no tooltip do
+// processo (atributo onmouseover -> infraTooltipMostrar) ou numa célula da
+// mesma linha da tabela.
 async function coletarDoFrame(frame) {
   try {
     return await frame.$$eval('a', (els) => {
-      // Reconhece número de processo: tem dígitos e algum separador (. - /),
-      // sem espaços, com tamanho razoável. Ex.: 00000.000123/2026-45,
-      // SEI-000000/000000/2026, 12345.678910/2026-01, etc.
       const pareceProcesso = (s) =>
         !!s && !/\s/.test(s) && /\d/.test(s) && /[.\-/]/.test(s) && s.length >= 9;
+      // Um texto que parece nome de pessoa/interessado (letras, espaços, sem
+      // parecer número de processo nem data).
+      const pareceNome = (s) => !!s && /[A-Za-zÀ-ú]{2,}/.test(s) && /\s/.test(s.trim())
+        && s.trim().length >= 5 && s.trim().length <= 90 && !pareceProcesso(s.trim())
+        && !/^\d/.test(s.trim());
+      // Extrai o interessado do tooltip do SEI: infraTooltipMostrar('titulo','texto...')
+      const doTooltip = (attr) => {
+        if (!attr) return '';
+        const m = attr.match(/infraTooltipMostrar\s*\(([^)]*)\)/i);
+        if (!m) return '';
+        // pega o conteúdo entre aspas; procura "Interessado" ou o 1º nome plausível
+        const partes = [...m[1].matchAll(/'([^']*)'|"([^"]*)"/g)].map((x) => (x[1] ?? x[2] ?? '').trim());
+        const alvo = partes.find((p) => /interessad/i.test(p)) || '';
+        const dep = alvo.replace(/.*interessad[oa]s?\s*:?\s*/i, '').trim();
+        if (dep && pareceNome(dep)) return dep.split(/[;\n<]/)[0].trim();
+        const outro = partes.find((p) => pareceNome(p));
+        return outro || '';
+      };
       const out = [];
       for (const el of els) {
         const txt = (el.textContent || '').trim();
         const href = el.getAttribute('href') || '';
         const porHref = /procedimento_trabalhar|procedimento_visualizar/.test(href);
         if ((porHref || pareceProcesso(txt)) && pareceProcesso(txt)) {
-          out.push({ numero_sei: txt, link_sei: el.href || '', porHref });
+          let interessado = doTooltip(el.getAttribute('onmouseover') || el.getAttribute('onmousemove') || '')
+            || (pareceNome(el.getAttribute('title') || '') ? el.getAttribute('title').trim() : '');
+          // Fallback: procura na mesma linha (tr) uma célula que pareça nome.
+          if (!interessado) {
+            const tr = el.closest('tr');
+            if (tr) {
+              for (const td of tr.querySelectorAll('td')) {
+                const t = (td.textContent || '').trim();
+                if (pareceNome(t)) { interessado = t; break; }
+              }
+            }
+          }
+          out.push({ numero_sei: txt, link_sei: el.href || '', porHref, interessado: interessado || null });
         }
       }
       return out;
@@ -242,7 +272,7 @@ async function extrairControleProcessos(page, unidadeNome) {
       numero_sei: l.numero_sei,
       link_sei: l.link_sei,
       tipo: null,
-      interessado: null,
+      interessado: l.interessado || null,
       especificacao: null,
       data_autuacao: null,
       unidade_origem: unidadeNome || null,
@@ -256,7 +286,14 @@ async function extrairControleProcessos(page, unidadeNome) {
   if (processos.length === 0) {
     amostra = await coletarAmostra(page);
   }
-  return { processos, amostra };
+  // Diagnóstico do interessado: como poucos/nenhum nome vieram, dumpa os
+  // atributos das primeiras linhas para eu calibrar o seletor.
+  let amostraInteressado = null;
+  const comNome = processos.filter((p) => p.interessado).length;
+  if (processos.length && comNome < processos.length) {
+    amostraInteressado = await coletarAmostraInteressado(page);
+  }
+  return { processos, amostra, amostraInteressado, comNome };
 }
 
 // Amostra de diagnóstico: títulos de tabelas e primeiros links de cada frame.
@@ -275,6 +312,37 @@ async function coletarAmostra(page) {
           `--- quadro: ${frame.url().slice(0, 80)} ---\n` +
             dados.map((d) => `${d.t}  =>  ${d.h.slice(0, 90)}`).join('\n')
         );
+      }
+    } catch { /* ignora */ }
+  }
+  return partes.join('\n\n').slice(0, 6000);
+}
+
+// Amostra dos atributos das linhas de processo (para calibrar o interessado).
+async function coletarAmostraInteressado(page) {
+  const partes = [];
+  for (const frame of page.frames()) {
+    try {
+      const linhas = await frame.$$eval('a', (els) => {
+        const pareceProcesso = (s) => !!s && !/\s/.test(s) && /\d/.test(s) && /[.\-/]/.test(s) && s.length >= 9;
+        return els
+          .filter((el) => pareceProcesso((el.textContent || '').trim()))
+          .slice(0, 12)
+          .map((el) => {
+            const tr = el.closest('tr');
+            const cels = tr ? [...tr.querySelectorAll('td')].map((td) => (td.textContent || '').trim()).filter(Boolean) : [];
+            return {
+              n: (el.textContent || '').trim(),
+              om: (el.getAttribute('onmouseover') || '').slice(0, 220),
+              ti: (el.getAttribute('title') || '').slice(0, 120),
+              row: cels.join(' | ').slice(0, 260),
+            };
+          });
+      });
+      if (linhas.length) {
+        partes.push(`--- ${frame.url().slice(0, 70)} ---\n` +
+          linhas.map((l) => `Nº ${l.n}\n  onmouseover: ${l.om}\n  title: ${l.ti}\n  linha: ${l.row}`).join('\n'));
+        break; // o primeiro frame com processos basta
       }
     } catch { /* ignora */ }
   }
@@ -446,12 +514,18 @@ export async function extrairProcessos(cfg, mock) {
     if (r1.amostra) {
       try { fs.writeFileSync(join(DIR_DIAG, 'debug-amostra.txt'), r1.amostra, 'utf8'); } catch { /* ignora */ }
     }
+    const comNome = todos.filter((p) => p.interessado).length;
+    if (r1.amostraInteressado) {
+      try { fs.writeFileSync(join(DIR_DIAG, 'debug-interessados.txt'), `Com nome: ${comNome}/${todos.length}\n\n${r1.amostraInteressado}`, 'utf8'); } catch { /* ignora */ }
+    }
     return {
       modo: 'sei',
       processos: todos,
       porUnidade,
       debug,
       amostra: r1.amostra,
+      comNome,
+      interessadosDebug: r1.amostraInteressado || null,
       unidadesEncontradas: unidades.map((u) => u.nome),
       unidadesDebug: resumoUnidades,
     };
