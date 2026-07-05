@@ -381,6 +381,32 @@ if (getConfig('interessados_limpos_v2') !== '1') {
   } catch { /* ignora */ }
 }
 
+// Um valor com cara de NÚMERO DE PROCESSO SEI (não pode ser matrícula/CPF).
+export function pareceNumeroProcesso(v) {
+  const s = String(v || '');
+  return /\/\s*(19|20)\d{2}\s*-\s*\d/.test(s) || /\d{5,}\.\d{4,}\/\d{4}/.test(s) || s.replace(/\D/g, '').length >= 14;
+}
+
+// Correção única: apaga matrícula/CPF/identidade que foram gravados por engano
+// com o NÚMERO DO PROCESSO (leituras antigas de OCR). Assim o próximo "Buscar
+// conteúdo" preenche o valor certo (o campo volta a ficar vazio).
+if (getConfig('matriculas_limpas_v1') !== '1') {
+  try {
+    const campos = ['matricula', 'cpf', 'identidade', 'nit', 'pis_pasep', 'titulo_eleitor'];
+    const rows = db.prepare(`SELECT id, ${campos.join(', ')} FROM servidores`).all();
+    const upd = db.prepare(`UPDATE servidores SET ${campos.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`);
+    for (const r of rows) {
+      let mudou = false;
+      const vals = campos.map((c) => {
+        if (r[c] && pareceNumeroProcesso(r[c])) { mudou = true; return null; }
+        return r[c];
+      });
+      if (mudou) upd.run(...vals, r.id);
+    }
+    setConfig('matriculas_limpas_v1', '1');
+  } catch { /* ignora */ }
+}
+
 export function registrarHistorico({ processoId, usuario, acao, detalhe }) {
   db.prepare(
     `INSERT INTO historico (processo_id, usuario_id, usuario_nome, acao, detalhe)
