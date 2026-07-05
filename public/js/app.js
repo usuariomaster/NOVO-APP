@@ -639,7 +639,7 @@ async function extrairDoSei() {
 // Ficha funcional agrupada (espelha a tela de RH da Prefeitura).
 const GRUPOS_SERV = [
   ['Identificação', [
-    ['nome', 'Nome'], ['cpf', 'CPF'], ['matricula', 'Matrícula'], ['data_nascimento', 'Nascimento'],
+    ['nome', 'Nome'], ['prontuario', 'Prontuário nº (perícia)'], ['cpf', 'CPF'], ['matricula', 'Matrícula'], ['data_nascimento', 'Nascimento'],
     ['sexo', 'Sexo'], ['estado_civil', 'Estado civil'], ['nacionalidade', 'Nacionalidade'],
     ['naturalidade', 'Naturalidade'], ['uf_naturalidade', 'UF nat.'], ['grau_instrucao', 'Grau de instrução'],
     ['pai', 'Pai'], ['mae', 'Mãe'],
@@ -788,8 +788,9 @@ async function renderServidorDetalhe(id) {
           ${a.descricao ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(a.descricao)}</div>` : ''}
           ${a.perito ? `<div class="muted" style="font-size:12px">Perito: ${esc(a.perito)}</div>` : ''}
         </div>
-        <div style="display:flex;gap:4px">
-          <a class="btn secondary sm" href="/api/servidores/${id}/bim/${a.id}" target="_blank" rel="noopener" title="Emitir comprovante de BIM">🖨 BIM</a>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+          <a class="btn secondary sm" href="/api/servidores/${id}/bim/${a.id}" target="_blank" rel="noopener" title="Boletim de Inspeção Médica (uso interno)">🖨 BIM</a>
+          <a class="btn secondary sm" href="/api/servidores/${id}/comprovante/${a.id}" target="_blank" rel="noopener" title="Comprovante ao servidor (resposta oficial)">📄 Comprovante</a>
           <button class="btn secondary sm" data-editaf="${a.id}">✏️</button><button class="btn danger sm" data-delaf="${a.id}">🗑</button></div>
       </div>
     </div>`).join('')
@@ -959,19 +960,27 @@ async function renderServidorDetalhe(id) {
       <select name="processo_id"><option value="">— sem vínculo —</option>${
         s.processos.map((p) => `<option value="${p.id}" ${String(a.processo_id) === String(p.id) ? 'selected' : ''}>${esc(p.numero_sei)} — ${esc(p.especificacao || p.tipo || '')}</option>`).join('')
       }</select></div>
-    <div class="row"><div class="field"><label>Tipo</label>
-      <input name="tipo" placeholder="ex.: Afastamento, Redução de carga horária, Reconsideração" value="${esc(a.tipo || '')}"></div>
+    <div class="row"><div class="field"><label>Natureza (parecer)</label>
+      <select name="natureza"><option value="">—</option>
+        ${['Licença inicial', 'Prorrogação', 'Alta', 'Aposentadoria por invalidez', 'Readaptação', 'Reconsideração'].map((n) => `<option ${a.natureza === n ? 'selected' : ''}>${n}</option>`).join('')}
+      </select></div>
       <div class="field"><label>Conclusão / decisão</label>
-      <input name="conclusao" list="conc-list" placeholder="Deferido / Indeferido / Diligência" value="${esc(a.conclusao || '')}">
-      <datalist id="conc-list"><option value="Deferido"><option value="Indeferido"><option value="Diligência"><option value="Apto"><option value="Inapto"></datalist></div></div>
+      <input name="conclusao" list="conc-list" placeholder="Concedido / Negado / Em exigência" value="${esc(a.conclusao || '')}">
+      <datalist id="conc-list"><option value="Concedido"><option value="Negado"><option value="Em exigência"><option value="Deferido"><option value="Indeferido"></datalist></div></div>
+    <div class="row"><div class="field"><label>Beneficiário</label>
+      <select name="beneficiario"><option value="">—</option><option ${a.beneficiario === 'Próprio' ? 'selected' : ''}>Próprio</option><option ${a.beneficiario === 'Familiar' ? 'selected' : ''}>Familiar</option></select></div>
+      <div class="field"><label>Remuneração</label>
+      <select name="remunerado"><option value="">—</option><option ${a.remunerado === 'Com' ? 'selected' : ''}>Com</option><option ${a.remunerado === 'Sem' ? 'selected' : ''}>Sem</option></select></div></div>
     <div class="row"><div class="field"><label>CID</label><input name="cid" placeholder="ex.: M54.5" value="${esc(a.cid || '')}"></div>
       <div class="field"><label>CID 2 (opcional)</label><input name="cid2" value="${esc(a.cid2 || '')}"></div></div>
     <div class="row"><div class="field"><label>Data da perícia</label><input name="data_pericia" type="date" value="${esc(a.data_pericia || '')}"></div>
-      <div class="field"><label>Nº do BIM</label><input name="bim_numero" value="${esc(a.bim_numero || '')}"></div></div>
-    <div class="row"><div class="field"><label>Início do afastamento</label><input name="data_inicio" type="date" value="${esc(a.data_inicio || '')}"></div>
+      <div class="field"><label>Início do afastamento</label><input name="data_inicio" type="date" value="${esc(a.data_inicio || '')}"></div>
       <div class="field"><label>Fim</label><input name="data_fim" type="date" value="${esc(a.data_fim || '')}"></div></div>
+    <div class="row"><div class="field"><label>Nº do BIM</label><input name="bim_numero" value="${esc(a.bim_numero || '')}"></div>
+      <div class="field"><label>BIM anterior nº</label><input name="bim_anterior" value="${esc(a.bim_anterior || '')}"></div>
+      <div class="field"><label>Licença ininterrupta anterior (dias)</label><input name="licenca_anterior_dias" type="number" value="${esc(a.licenca_anterior_dias || '')}"></div></div>
     <div class="field"><label>Perito responsável</label><input name="perito" value="${esc(a.perito || '')}"></div>
-    <div class="field"><label>Descrição / observações</label><input name="descricao" value="${esc(a.descricao || '')}"></div>`;
+    <div class="field"><label>Relatório / observações ao servidor</label><textarea name="descricao" style="min-height:60px">${esc(a.descricao || '')}</textarea></div>`;
   document.getElementById('s-add-af').onclick = async () => {
     const r = await modal({ titulo: '＋ Nova ocorrência / BIM', okLabel: 'Salvar', corpo: formOcorrencia() });
     if (!r) return;

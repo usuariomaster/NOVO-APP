@@ -236,6 +236,14 @@ garantirColuna('afastamentos', 'data_pericia', 'data_pericia TEXT');
 garantirColuna('afastamentos', 'conclusao', 'conclusao TEXT');
 garantirColuna('afastamentos', 'perito', 'perito TEXT');
 garantirColuna('afastamentos', 'bim_numero', 'bim_numero TEXT');
+// Campos do BIM oficial (parecer médico pericial)
+garantirColuna('afastamentos', 'natureza', 'natureza TEXT');        // Licença inicial/Prorrogação/Alta/Aposentadoria por invalidez
+garantirColuna('afastamentos', 'beneficiario', 'beneficiario TEXT'); // Próprio/Familiar
+garantirColuna('afastamentos', 'remunerado', 'remunerado TEXT');     // Com/Sem remuneração
+garantirColuna('afastamentos', 'bim_anterior', 'bim_anterior TEXT');
+garantirColuna('afastamentos', 'licenca_anterior_dias', 'licenca_anterior_dias INTEGER');
+// Número de prontuário interno da perícia (por servidor)
+garantirColuna('servidores', 'prontuario', 'prontuario TEXT');
 
 // Servidor periciado (a pessoa dos processos) — vínculo com o processo
 garantirColuna('processos', 'servidor_id', 'servidor_id INTEGER');

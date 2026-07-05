@@ -10,6 +10,7 @@ import { descriptografar } from '../sei/crypto.js';
 import { capturarFichaNoSei } from '../sei/detail.js';
 import { extrairFichaDeArquivos } from '../services/ia.js';
 import { timbreHTML, TIMBRE_CSS } from '../services/timbre.js';
+import { htmlBIM, htmlComprovanteServidor } from '../services/documentosPericia.js';
 
 const router = Router();
 router.use(exigirLogin);
@@ -28,6 +29,7 @@ const CAMPOS = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao', 'secre
   'data_posse', 'data_exercicio', 'tipo_salario', 'regime_previdencia', 'carga_horaria', 'vinculo_empregaticio',
   'unidade_trabalho', 'classificacao_funcional', 'simbologia', 'cbo', 'cbo_mt',
   'endereco', 'numero_ende', 'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email',
+  'prontuario',
   // Gerados por IA
   'ppp_atividades', 'ltcat', 'pcmso'];
 
@@ -169,7 +171,8 @@ router.post('/:id/afastamentos', (req, res) => {
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
   if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
   const { tipo, cid, cid2, data_inicio, data_fim, dias, descricao, processo_id,
-    data_pericia, conclusao, perito, bim_numero } = req.body || {};
+    data_pericia, conclusao, perito, bim_numero,
+    natureza, beneficiario, remunerado, bim_anterior, licenca_anterior_dias } = req.body || {};
   // calcula dias se não informado
   let d = dias ? parseInt(dias, 10) : null;
   if (!d && data_inicio && data_fim) {
@@ -178,16 +181,18 @@ router.post('/:id/afastamentos', (req, res) => {
   }
   const info = db.prepare(
     `INSERT INTO afastamentos (servidor_id, processo_id, tipo, cid, cid2, data_inicio, data_fim, dias, descricao,
-       data_pericia, conclusao, perito, bim_numero)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       data_pericia, conclusao, perito, bim_numero, natureza, beneficiario, remunerado, bim_anterior, licenca_anterior_dias)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(s.id, processo_id || null, tipo || null, cid || null, cid2 || null, data_inicio || null, data_fim || null, d,
-    descricao || null, data_pericia || null, conclusao || null, perito || null, bim_numero || null);
+    descricao || null, data_pericia || null, conclusao || null, perito || null, bim_numero || null,
+    natureza || null, beneficiario || null, remunerado || null, bim_anterior || null,
+    licenca_anterior_dias ? parseInt(licenca_anterior_dias, 10) : null);
   res.status(201).json({ id: info.lastInsertRowid });
 });
 
 // Atualiza uma ocorrência/BIM.
 router.put('/:id/afastamentos/:aid', (req, res) => {
-  const campos = ['tipo', 'cid', 'cid2', 'data_inicio', 'data_fim', 'dias', 'descricao', 'processo_id', 'data_pericia', 'conclusao', 'perito', 'bim_numero'];
+  const campos = ['tipo', 'cid', 'cid2', 'data_inicio', 'data_fim', 'dias', 'descricao', 'processo_id', 'data_pericia', 'conclusao', 'perito', 'bim_numero', 'natureza', 'beneficiario', 'remunerado', 'bim_anterior', 'licenca_anterior_dias'];
   const b = req.body || {};
   const cols = campos.filter((c) => b[c] !== undefined);
   if (cols.length) {
@@ -202,40 +207,22 @@ router.delete('/:id/afastamentos/:aid', (req, res) => {
   res.json({ ok: true });
 });
 
-// Comprovante de BIM (Boletim de Inspeção Médica) — imprimível, com timbre.
+// BIM (Boletim de Inspeção Médica) — formulário oficial imprimível.
 router.get('/:id/bim/:aid', (req, res) => {
   const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
   const a = db.prepare('SELECT * FROM afastamentos WHERE id = ? AND servidor_id = ?').get(req.params.aid, req.params.id);
   if (!s || !a) return res.status(404).send('Boletim não encontrado');
   const proc = a.processo_id ? db.prepare('SELECT numero_sei FROM processos WHERE id = ?').get(a.processo_id) : null;
-  const esc = (x) => String(x ?? '—').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  const dbr = (d) => { const m = String(d || '').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—'); };
-  res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
-    <title>BIM ${esc(a.bim_numero || a.id)} — ${esc(s.nome)}</title>
-    <style>body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:40px}
-    ${TIMBRE_CSS} h1{font-size:16px;text-align:center;margin:0 0 4px} .sub{text-align:center;color:#555;font-size:12px;margin-bottom:20px}
-    dl{display:grid;grid-template-columns:190px 1fr;gap:6px 12px;font-size:14px;margin:18px 0}
-    dt{color:#555;font-weight:600} .conc{display:inline-block;padding:3px 12px;border-radius:6px;font-weight:700;border:1px solid #999}
-    .ass{margin-top:70px;text-align:center}.linha{border-top:1px solid #000;width:300px;margin:0 auto;padding-top:6px}
-    @media print{.noprint{display:none}body{margin:0}}</style></head><body>
-    ${timbreHTML('Perícia Médica — Boletim de Inspeção Médica')}
-    <h1>BOLETIM DE INSPEÇÃO MÉDICA (BIM)</h1>
-    <div class="sub">Nº ${esc(a.bim_numero || a.id)}${proc ? ' · Processo ' + esc(proc.numero_sei) : ''}</div>
-    <dl>
-      <dt>Servidor</dt><dd><b>${esc(s.nome)}</b></dd>
-      <dt>Matrícula</dt><dd>${esc(s.matricula)}</dd>
-      <dt>Cargo</dt><dd>${esc(s.cargo)}</dd>
-      <dt>Lotação</dt><dd>${esc(s.secretaria || s.lotacao)}</dd>
-      <dt>Tipo</dt><dd>${esc(a.tipo)}</dd>
-      <dt>CID</dt><dd>${esc(a.cid)}${a.cid2 ? ' / ' + esc(a.cid2) : ''}</dd>
-      <dt>Data da perícia</dt><dd>${dbr(a.data_pericia)}</dd>
-      <dt>Período</dt><dd>${dbr(a.data_inicio)}${a.data_fim ? ' a ' + dbr(a.data_fim) : ''}${a.dias ? ' (' + a.dias + ' dias)' : ''}</dd>
-      <dt>Conclusão</dt><dd><span class="conc">${esc(a.conclusao || '—')}</span></dd>
-      <dt>Observações</dt><dd>${esc(a.descricao)}</dd>
-    </dl>
-    <div class="ass"><div class="linha">${esc(a.perito || 'Médico Perito')}</div></div>
-    <div class="noprint" style="text-align:center;margin-top:32px"><button onclick="print()" style="padding:10px 22px;font-size:15px">🖨 Imprimir BIM</button></div>
-  </body></html>`);
+  res.set('Content-Type', 'text/html; charset=utf-8').send(htmlBIM(s, a, proc));
+});
+
+// Comprovante ao servidor (resposta oficial com o texto-padrão).
+router.get('/:id/comprovante/:aid', (req, res) => {
+  const s = db.prepare('SELECT * FROM servidores WHERE id = ?').get(req.params.id);
+  const a = db.prepare('SELECT * FROM afastamentos WHERE id = ? AND servidor_id = ?').get(req.params.aid, req.params.id);
+  if (!s || !a) return res.status(404).send('Comprovante não encontrado');
+  const proc = a.processo_id ? db.prepare('SELECT numero_sei FROM processos WHERE id = ?').get(a.processo_id) : null;
+  res.set('Content-Type', 'text/html; charset=utf-8').send(htmlComprovanteServidor(s, a, proc));
 });
 
 // ---- Prontuário (documentos médicos) ----
