@@ -1055,16 +1055,16 @@ async function renderServidorDetalhe(id) {
       <div>
         <div class="card"><div class="card-h">🩺 Ocorrências / BIM (CID) <button class="btn sm" id="s-add-af">＋ Nova ocorrência</button></div>
           <div class="card-b">${afast}</div></div>
-        <div class="card"><div class="card-h">📅 Licenças / afastamentos</div><div class="card-b">${licencas}</div></div>
+        <div class="card"><div class="card-h">Processos na perícia</div><div class="card-b" style="overflow-x:auto">${procs}</div></div>
+        <div class="card"><div class="card-h">📅 Licenças / afastamentos</div><div class="card-b" style="overflow-x:auto">${licencas}</div></div>
+        <div class="card"><div class="card-h">🗄️ Arquivo do servidor <span class="muted" style="font-weight:400;font-size:12px">${arquivados.length} arquivado(s)</span></div><div class="card-b" style="overflow-x:auto">${arquivo}</div></div>
+      </div>
+      <div>
         <div class="card"><div class="card-h">💬 Comentários da equipe</div><div class="card-b">
           <div id="s-coms">${comentarios}</div>
           <div class="field" style="margin:10px 0 0"><textarea id="s-com-texto" style="min-height:56px" placeholder="Anotação da equipe sobre este servidor…"></textarea></div>
           <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn sm" id="s-com-add">Adicionar comentário</button></div>
         </div></div>
-      </div>
-      <div>
-        <div class="card"><div class="card-h">Processos na perícia</div><div class="card-b">${procs}</div></div>
-        <div class="card"><div class="card-h">🗄️ Arquivo do servidor <span class="muted" style="font-weight:400;font-size:12px">${arquivados.length} arquivado(s)</span></div><div class="card-b">${arquivo}</div></div>
         <div class="card"><div class="card-h">Prontuário médico</div><div class="card-b">
           <div id="s-docs">${docs}</div>
           <div class="row" style="margin-top:10px;align-items:flex-end">
