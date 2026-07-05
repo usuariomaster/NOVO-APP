@@ -211,21 +211,24 @@ async function coletarMetadados(page) {
   for (const f of page.frames()) {
     try {
       const d = await f.evaluate(() => {
-        const val = (sel) => {
-          const e = document.querySelector(sel);
-          if (!e) return null;
-          if (e.tagName === 'SELECT') { const o = e.options[e.selectedIndex]; return o ? o.textContent.trim() : null; }
-          return (e.value || e.textContent || '').trim() || null;
-        };
-        const tipo = val('#selTipoProcedimento') || val('select[id*="Tipo"]');
-        const espec = val('#txtDescricao') || val('#txtEspecificacao') || val('input[id*="Descricao"]') || val('input[id*="Especific"]');
-        let inter = null;
-        const selInt = document.querySelector('#selInteressados, select[id*="Interessad"]');
-        if (selInt && selInt.options) inter = Array.from(selInt.options).map((o) => o.textContent.trim()).filter(Boolean).join('; ') || null;
+        // Campos reais da autuação do SEI de Nova Iguaçu (descobertos por amostra):
+        //  hdnInteressadosProcedimento = "id±NOME¥id±NOME2"
+        //  hdnAssuntos                 = "id±CODIGO - descrição"
+        //  selTipoProcedimento         = tipo do processo (opção selecionada)
+        //  txtDescricao                = descrição livre (às vezes "REF. NOME")
+        const g = (id) => { const e = document.getElementById(id); return e ? String(e.value || e.textContent || '').trim() : ''; };
+        const selText = (id) => { const e = document.getElementById(id); if (!e || !e.options) return ''; const o = e.options[e.selectedIndex]; return o ? o.textContent.trim() : ''; };
+        const aposPipe = (v) => !v ? '' : v.split(/[¥\n]/).map((x) => { const i = x.indexOf('±'); return (i >= 0 ? x.slice(i + 1) : x).trim(); }).filter(Boolean).join('; ');
+
+        const tipo = selText('selTipoProcedimento') || g('hdnNomeTipoProcedimento') || null;
+        let inter = aposPipe(g('hdnInteressadosProcedimento'));
         if (!inter) {
-          const t = document.querySelector('[id*="Interessad"], [id*="tblInteressados"]');
-          if (t) inter = (t.innerText || '').trim().split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 3).join('; ') || null;
+          const sel = document.getElementById('selInteressadosProcedimento') || document.querySelector('select[id*="Interessad"]');
+          if (sel && sel.options) inter = Array.from(sel.options).map((o) => o.textContent.trim()).filter(Boolean).join('; ');
         }
+        inter = inter || null;
+        // Assunto/especificação: prefere a descrição livre; senão o assunto classificado.
+        const espec = g('txtDescricao') || aposPipe(g('hdnAssuntos')) || null;
         // amostra: rótulos + campos visíveis
         const campos = Array.from(document.querySelectorAll('input,select,textarea'))
           .map((e) => `${e.id || e.name || ''}=${(e.value || (e.tagName === 'SELECT' && e.options[e.selectedIndex]?.textContent) || '').toString().trim().slice(0, 40)}`)
