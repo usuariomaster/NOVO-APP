@@ -156,8 +156,8 @@ router.post('/:id/buscar-ficha-sei', exigirPapel('operador', 'admin', 'admin_mas
     if (existeAf.get(s.id, a.data_inicio || '', a.tipo || '')) continue;
     let dias = null;
     if (a.data_inicio && a.data_fim) { const di = new Date(a.data_inicio), df = new Date(a.data_fim); if (!isNaN(di) && !isNaN(df)) dias = Math.max(0, Math.round((df - di) / 86400000) + 1); }
-    db.prepare('INSERT INTO afastamentos (servidor_id, processo_id, tipo, data_inicio, data_fim, dias, descricao) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(s.id, proc.id, a.tipo || null, a.data_inicio || null, a.data_fim || null, dias, a.descricao || null);
+    db.prepare('INSERT INTO afastamentos (servidor_id, processo_id, tipo, cid, conclusao, data_inicio, data_fim, dias, descricao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.id, proc.id, a.tipo || null, a.cid || null, a.conclusao || null, a.data_inicio || null, a.data_fim || null, dias, a.descricao || null);
     nAfast++;
   }
   res.json({ ok: true, campos, preenchidos: aGravar.length, lidos: cols.length, origem, temFicha, afastamentos: nAfast });

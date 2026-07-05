@@ -21,11 +21,11 @@ const COLS_FICHA_SERV = ['nome', 'cpf', 'matricula', 'cargo', 'funcao', 'lotacao
   'unidade_trabalho', 'classificacao_funcional', 'simbologia', 'cbo', 'cbo_mt', 'endereco', 'numero_ende',
   'bairro', 'municipio', 'uf_ende', 'cep', 'complemento', 'telefone', 'celular', 'email', 'observacoes'];
 
-// Registra afastamentos lidos por OCR (evita duplicar por servidor/início/tipo).
+// Registra afastamentos/ocorrências lidos por OCR (dedup por servidor/início/tipo).
 function salvarAfastamentosOcr(servidorId, processoId, afastamentos) {
   if (!servidorId || !Array.isArray(afastamentos) || !afastamentos.length) return 0;
   const existe = db.prepare('SELECT id FROM afastamentos WHERE servidor_id = ? AND IFNULL(data_inicio,\'\') = ? AND IFNULL(tipo,\'\') = ?');
-  const ins = db.prepare(`INSERT INTO afastamentos (servidor_id, processo_id, tipo, data_inicio, data_fim, dias, descricao) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const ins = db.prepare(`INSERT INTO afastamentos (servidor_id, processo_id, tipo, cid, conclusao, data_inicio, data_fim, dias, descricao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
   for (const a of afastamentos) {
     if (existe.get(servidorId, a.data_inicio || '', a.tipo || '')) continue;
@@ -34,7 +34,7 @@ function salvarAfastamentosOcr(servidorId, processoId, afastamentos) {
       const di = new Date(a.data_inicio), df = new Date(a.data_fim);
       if (!isNaN(di) && !isNaN(df)) dias = Math.max(0, Math.round((df - di) / 86400000) + 1);
     }
-    ins.run(servidorId, processoId || null, a.tipo || null, a.data_inicio || null, a.data_fim || null, dias, a.descricao || null);
+    ins.run(servidorId, processoId || null, a.tipo || null, a.cid || null, a.conclusao || null, a.data_inicio || null, a.data_fim || null, dias, a.descricao || null);
     n++;
   }
   return n;

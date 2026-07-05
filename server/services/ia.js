@@ -109,9 +109,11 @@ const INSTRUCAO_FICHA =
   `IMPORTANTE: a "matrícula" é um número curto do servidor (ex.: "76/707.347-1"), NUNCA o número do processo. ` +
   `Preencha "observacoes" com um resumo em 1-3 frases da nomeação/portaria/lotação/exercício encontrados no despacho. ` +
   `Inclua a chave booleana "tem_ficha_funcional": true se houver a ficha de Dados Cadastrais do Funcionário. ` +
-  `Inclua também a chave "afastamentos": uma lista (pode ser vazia) de licenças/afastamentos citados nos ` +
+  `Inclua também a chave "afastamentos": uma lista (pode ser vazia) de licenças/afastamentos/ocorrências citados nos ` +
   `despachos, cada item com { "tipo": "ex.: Licença para tratar de assuntos particulares", "data_inicio": "AAAA-MM-DD", ` +
-  `"data_fim": "AAAA-MM-DD", "descricao": "base legal, ex.: Portaria SEMAD nº 1.324/025" }. Não invente datas.`;
+  `"data_fim": "AAAA-MM-DD", "cid": "se houver", "conclusao": "a DECISÃO do despacho: Deferido/Indeferido/Diligência/Apto/Inapto ` +
+  `— use Deferido quando o texto diz concedeu/deferido/autorizado; Indeferido quando nega/indefere; vazio se não houver decisão", ` +
+  `"descricao": "base legal, ex.: Portaria SEMAD nº 1.324/025" }. Não invente datas nem decisões.`;
 
 // Um valor com cara de NÚMERO DE PROCESSO SEI (ex.: 20708202031.001315/2026-82).
 function pareceNumeroProcesso(v) {
@@ -163,6 +165,8 @@ function lerAfastamentos(obj) {
   return arr
     .map((a) => ({
       tipo: String(a.tipo || '').trim() || null,
+      cid: String(a.cid || '').trim() || null,
+      conclusao: String(a.conclusao || '').trim() || null,
       data_inicio: isData(a.data_inicio) ? a.data_inicio.trim() : null,
       data_fim: isData(a.data_fim) ? a.data_fim.trim() : null,
       descricao: String(a.descricao || '').trim() || null,
