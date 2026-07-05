@@ -208,6 +208,28 @@ export async function extrairFichaDeArquivos(arquivos, ctx = {}) {
   return { campos, temFicha: leuFicha(obj, campos), afastamentos: lerAfastamentos(obj) };
 }
 
+// ---- Sugere o texto do DESPACHO MÉDICO (decisão do perito) ----
+// Estilo formal do serviço público (como os despachos reais da perícia):
+// análise técnica, fundamentação normativa, decisão. É SUGESTÃO — o
+// julgamento médico é do perito, que revisa e edita.
+export async function sugerirDespacho({ numeroSei, interessado, assunto, tipo, contexto, decisao }) {
+  const system =
+    'Você é assistente de um médico perito da Junta Médica Oficial de Nova Iguaçu. ' +
+    'Redige MINUTAS de despacho pericial em linguagem formal do serviço público, técnica e objetiva, ' +
+    'fundamentando quando cabível nas normas usuais (Resolução CFM 2.382/2024, IN e portarias da SEMUS/SEMAT). ' +
+    'NÃO invente diagnósticos, CID, datas ou fatos que não estejam no contexto; quando faltar dado, use lacuna ' +
+    'genérica (ex.: "conforme atestado apresentado"). A decisão final é do perito. Devolva SOMENTE um JSON.';
+  const prompt =
+    `Processo: ${numeroSei || '—'}\nServidor: ${interessado || '—'}\nAssunto: ${assunto || tipo || '—'}\n` +
+    `Direção pretendida pelo perito: ${decisao || '(não informada — sugira a mais provável e sinalize)'}\n` +
+    `Contexto/documentos (se houver):\n"""${String(contexto || '').slice(0, 6000)}"""\n\n` +
+    `Escreva a minuta e devolva um JSON:\n{\n` +
+    `  "texto": "o corpo do despacho, em texto corrido, pronto para o perito revisar e assinar",\n` +
+    `  "conclusao": "uma palavra/expressão: Deferido | Indeferido | Em exigência | Diligência"\n}`;
+  const obj = await chamarClaude({ system, prompt, maxTokens: 1500, json: true });
+  return { texto: String(obj.texto || '').trim(), conclusao: String(obj.conclusao || '').trim() };
+}
+
 // ---- Gera PPP/LTCAT/PCMSO a partir do CBO e das atividades ----
 export async function enriquecerPorCBO({ cbo, cargo, atividades, secretaria, lotacao }) {
   const system =

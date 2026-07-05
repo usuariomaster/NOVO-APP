@@ -107,6 +107,7 @@ const rotas = {
   '#usuarios': renderUsuarios,
   '#sei': renderConfigSei,
   '#ia': renderConfigIa,
+  '#config-pericia': renderConfigPericia,
 };
 
 async function navegar() {
@@ -157,6 +158,7 @@ function shell(conteudo) {
     isOper ? `<a href="#mensageiro">🚚 Malote</a>` : '',
     `<a href="#arquivo">🗄️ Arquivo</a>`,
     isAdmin ? `<a href="#usuarios">👥 Usuários &amp; Peritos</a>` : '',
+    isAdmin ? `<a href="#config-pericia">⚙️ Config. da Perícia</a>` : '',
     isAdmin ? `<a href="#sei">🔗 Configuração SEI</a>` : '',
     isAdmin ? `<a href="#ia">🤖 Configuração da IA</a>` : '',
   ]).join('');
@@ -1362,8 +1364,11 @@ function renderAreaDespacho(p, isOper, isPerito) {
             </div>
           </div>
           <div class="field">
-            <label>Texto do despacho <span class="muted" style="font-weight:400">— processo ${esc(p.numero_sei)}</span></label>
-            <textarea id="d-texto" placeholder="Redija aqui o despacho…">${esc(d?.texto || '')}</textarea>
+            <label style="display:flex;justify-content:space-between;align-items:center">
+              <span>Texto do despacho <span class="muted" style="font-weight:400">— processo ${esc(p.numero_sei)}</span></span>
+              <button class="btn secondary sm" id="d-ia-sugerir" type="button" title="A IA redige uma minuta que você revisa e edita">🤖 Sugerir com IA</button>
+            </label>
+            <textarea id="d-texto" placeholder="Redija aqui o despacho… ou use “🤖 Sugerir com IA” e revise.">${esc(d?.texto || '')}</textarea>
           </div>
           <div class="field">
             <label>Ou anexe um despacho feito fora do sistema (PDF/imagem)</label>
@@ -1647,6 +1652,25 @@ function ligarAcoes(p, isOper, isPerito) {
     };
   }
 
+  // 🤖 Sugerir despacho com IA (minuta que o perito revisa).
+  const btnIaSug = document.getElementById('d-ia-sugerir');
+  if (btnIaSug) btnIaSug.onclick = async () => {
+    const alvo = document.getElementById('d-texto');
+    if (alvo.value.trim() && !confirm('Substituir o texto atual pela sugestão da IA?')) return;
+    const decisao = document.getElementById('d-conclusao')?.value || '';
+    btnIaSug.disabled = true; const o = btnIaSug.textContent; btnIaSug.textContent = '⏳ Redigindo…';
+    try {
+      const r = await api.post(`/api/ia/despacho/${p.id}`, { decisao });
+      if (r.texto) alvo.value = r.texto;
+      const sel = document.getElementById('d-conclusao');
+      if (r.conclusao && sel && [...sel.options].some((op) => op.value === r.conclusao)) sel.value = r.conclusao;
+      toast('Minuta gerada — revise e ajuste antes de enviar.');
+    } catch (e) {
+      const msg = /não configurada/i.test(e.message) ? 'Configure a chave da IA em "Configuração da IA".' : e.message;
+      toast(msg, true);
+    } finally { btnIaSug.disabled = false; btnIaSug.textContent = o; }
+  };
+
   // Perito: salvar / enviar despacho
   const btnSalvar = document.getElementById('btn-salvar-despacho');
   const btnEnviar = document.getElementById('btn-enviar-despacho');
@@ -1924,6 +1948,38 @@ async function renderConfigIa() {
       const r = await api.post('/api/ia/testar');
       msg.innerHTML = r.ok ? '✅ Conexão OK — a IA respondeu.' : `Resposta inesperada: ${esc(r.resposta || '')}`;
     } catch (e) { msg.innerHTML = `<span style="color:var(--danger,#c00)">❌ ${esc(e.message)}</span>`; }
+  };
+}
+
+// Configuração da Perícia — texto-padrão do comprovante + contato.
+async function renderConfigPericia() {
+  shell('<div class="empty">Carregando…</div>');
+  const c = await api.get('/api/config/pericia').catch(() => ({}));
+  setMain(`
+    <div class="page-head"><div>
+      <h2>⚙️ Configuração da Perícia</h2>
+      <div class="desc">Textos e contatos usados nos documentos oficiais (comprovante ao servidor).</div>
+    </div></div>
+    <div class="card"><div class="card-b">
+      <div class="row"><div class="field"><label>WhatsApp da perícia</label><input id="cp-wa" value="${esc(c.pericia_whatsapp || '')}"></div>
+        <div class="field"><label>E-mail da perícia</label><input id="cp-email" value="${esc(c.pericia_email || '')}"></div></div>
+      <div class="field"><label>Horários</label><input id="cp-horario" value="${esc(c.pericia_horario || '')}"></div>
+      <div class="field"><label>Texto-padrão do comprovante (uma observação por linha)</label>
+        <textarea id="cp-obs" style="min-height:220px;font-size:13px">${esc(c.comprovante_obs || '')}</textarea></div>
+      <button class="btn" id="cp-salvar">Salvar</button>
+      <span class="muted" style="margin-left:10px;font-size:13px">Aparece no rodapé do comprovante ao servidor.</span>
+    </div></div>
+  `);
+  document.getElementById('cp-salvar').onclick = async () => {
+    try {
+      await api.post('/api/config/pericia', {
+        pericia_whatsapp: document.getElementById('cp-wa').value,
+        pericia_email: document.getElementById('cp-email').value,
+        pericia_horario: document.getElementById('cp-horario').value,
+        comprovante_obs: document.getElementById('cp-obs').value,
+      });
+      toast('Configuração da perícia salva');
+    } catch (e) { toast(e.message, true); }
   };
 }
 

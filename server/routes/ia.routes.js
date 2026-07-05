@@ -5,7 +5,7 @@ import db from '../db.js';
 import { exigirLogin, exigirPapel } from '../auth.js';
 import {
   temChave, modeloAtual, guardarChave, definirModelo, testarChave,
-  extrairFichaFuncional, extrairFichaDeArquivos, enriquecerPorCBO,
+  extrairFichaFuncional, extrairFichaDeArquivos, enriquecerPorCBO, sugerirDespacho,
 } from '../services/ia.js';
 
 const router = Router();
@@ -48,6 +48,24 @@ router.post('/extrair-ficha', exigirPapel('operador', 'admin', 'admin_master', '
       return res.status(400).json({ erro: 'Cole o texto ou anexe uma imagem/PDF da ficha.' });
     }
     res.json({ campos: out.campos, temFicha: out.temFicha });
+  } catch (e) {
+    res.status(502).json({ erro: e.message });
+  }
+});
+
+// Sugere a minuta do despacho do perito para um processo.
+router.post('/despacho/:processoId', exigirPapel('perito', 'perito_admin', 'operador', 'admin', 'admin_master'), async (req, res) => {
+  const p = db.prepare('SELECT * FROM processos WHERE id = ?').get(req.params.processoId);
+  if (!p) return res.status(404).json({ erro: 'Processo não encontrado' });
+  // Junta o texto dos documentos já lidos (se houver) como contexto.
+  const docs = db.prepare("SELECT tipo, conteudo FROM documentos WHERE processo_id = ? AND conteudo IS NOT NULL AND conteudo <> ''").all(p.id);
+  const contexto = docs.map((d) => `[${d.tipo || 'doc'}] ${d.conteudo}`).join('\n\n').slice(0, 6000);
+  try {
+    const r = await sugerirDespacho({
+      numeroSei: p.numero_sei, interessado: p.interessado, assunto: p.especificacao, tipo: p.tipo,
+      contexto, decisao: req.body?.decisao,
+    });
+    res.json(r);
   } catch (e) {
     res.status(502).json({ erro: e.message });
   }

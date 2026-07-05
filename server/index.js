@@ -18,6 +18,7 @@ import padroesRoutes from './routes/padroes.routes.js';
 import servidoresRoutes from './routes/servidores.routes.js';
 import iaRoutes from './routes/ia.routes.js';
 import juntasRoutes from './routes/juntas.routes.js';
+import configRoutes from './routes/config.routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +48,7 @@ app.use('/api/padroes', padroesRoutes);
 app.use('/api/servidores', servidoresRoutes);
 app.use('/api/ia', iaRoutes);
 app.use('/api/juntas', juntasRoutes);
+app.use('/api/config', configRoutes);
 
 // Front-end estático
 app.use(express.static(join(__dirname, '..', 'public')));
