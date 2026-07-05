@@ -969,6 +969,52 @@ async function renderServidorDetalhe(id) {
     <tbody>${arquivados.map(linhaProc).join('')}</tbody></table>`
     : '<span class="muted">Nenhum processo arquivado.</span>';
 
+  // ---- Resumo (dados que já existem, sem abrir a ficha inteira) ----
+  const idade = (() => {
+    if (!s.data_nascimento) return '';
+    const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s.data_nascimento) || /(\d{2})\/(\d{2})\/(\d{4})/.exec(s.data_nascimento);
+    if (!m) return '';
+    const ano = m[1].length === 4 ? +m[1] : +m[3];
+    const y = 2026 - ano; return y > 0 && y < 120 ? ` (${y} anos)` : '';
+  })();
+  const item = (lbl, val) => val ? `<div class="resumo-item"><span class="muted">${lbl}</span><b>${esc(val)}</b></div>` : '';
+  const resumo = `<div class="resumo-grid">
+    ${item('Matrícula', s.matricula)}
+    ${item('CPF', s.cpf)}
+    ${item('Nascimento', s.data_nascimento ? dataBR(s.data_nascimento) + idade : '')}
+    ${item('Sexo', s.sexo)}
+    ${item('Cargo', s.cargo)}
+    ${item('CBO', s.cbo)}
+    ${item('Secretaria', s.secretaria)}
+    ${item('Lotação', s.lotacao)}
+    ${item('Vínculo / situação', s.situacao || s.vinculo)}
+    ${item('WhatsApp', s.whatsapp)}
+    <div class="resumo-item"><span class="muted">Processos</span><b>${s.processos.length}</b></div>
+    <div class="resumo-item"><span class="muted">Dias afastado</span><b>${s.total_dias_afastado}</b></div>
+  </div>
+  ${s.prontuario ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"><div class="muted" style="font-weight:600;margin-bottom:4px">Prontuário / resumo clínico</div><div style="white-space:pre-wrap">${esc(s.prontuario)}</div></div>` : ''}`;
+
+  // ---- Licenças (histórico cronológico de afastamentos com período) ----
+  const lics = s.afastamentos.filter((a) => a.data_inicio)
+    .sort((a, b) => String(b.data_inicio).localeCompare(String(a.data_inicio)));
+  const licencas = lics.length ? `<table><thead><tr><th>Período</th><th>Dias</th><th>CID</th><th>Natureza / conclusão</th></tr></thead>
+    <tbody>${lics.map((a) => `<tr>
+      <td>${dataBR(a.data_inicio)}${a.data_fim ? ' a ' + dataBR(a.data_fim) : ''}</td>
+      <td>${a.dias || '—'}</td>
+      <td class="num-proc">${esc(a.cid || '—')}${a.cid2 ? '/' + esc(a.cid2) : ''}</td>
+      <td>${esc(a.natureza || a.tipo || '—')}${a.conclusao ? ' • ' + esc(a.conclusao) : ''}</td></tr>`).join('')}</tbody></table>
+    <div class="muted" style="font-size:12px;margin-top:6px">Total: ${s.total_dias_afastado} dia(s) em ${lics.length} período(s).</div>`
+    : '<span class="muted">Nenhuma licença/afastamento com período registrado.</span>';
+
+  // ---- Comentários (anotações livres da equipe, tipo cesar.ia) ----
+  const comentarios = (s.comentarios && s.comentarios.length)
+    ? s.comentarios.map((c) => `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="white-space:pre-wrap">${esc(c.texto)}</div>
+        <div class="muted" style="font-size:12px;margin-top:3px;display:flex;justify-content:space-between;align-items:center">
+          <span>${esc(c.autor || '')} • ${dataBR(c.criado_em)}</span>
+          <button class="btn danger sm" data-delcom="${c.id}">🗑</button></div></div>`).join('')
+    : '<span class="muted">Sem comentários.</span>';
+
   setMain(`
     <div class="page-head"><div>
       <a href="#servidores" class="muted">← servidores</a>
@@ -979,21 +1025,42 @@ async function renderServidorDetalhe(id) {
       <button class="btn secondary" id="s-formar-junta">⚖️ Formar Junta</button>
       <a class="btn" href="/api/servidores/${id}/ppp" target="_blank" rel="noopener">🖨 Ficha / PPP</a>
     </div></div>
-    <div class="detail-grid">
-      <div>
-        <div class="card"><div class="card-h">Ficha funcional
-          <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${fichaAviso}
-            <button class="btn secondary sm" id="s-ia-sei" title="Abre o processo no SEI, tira print da ficha e preenche sozinho">🤖 Buscar ficha no SEI</button>
-            <button class="btn secondary sm" id="s-ia-ficha">🤖 Preencher (colar/foto)</button>
-            <button class="btn sm" id="s-salvar">Salvar</button></span></div>
-          <div class="card-b">${ficha}</div></div>
-        <div class="card"><div class="card-h">Segurança do Trabalho / PPP
+
+    <!-- Resumo: só o que já existe, sem poluir a tela -->
+    <div class="card"><div class="card-h">📋 Resumo do servidor
+      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${fichaAviso}
+        <button class="btn secondary sm" id="s-ia-sei" title="Abre o processo no SEI, tira print da ficha e preenche sozinho">🤖 Buscar ficha no SEI</button>
+      </span></div>
+      <div class="card-b">${resumo}</div></div>
+
+    <!-- Ficha completa fica recolhida (edição sob demanda) -->
+    <details class="card">
+      <summary style="cursor:pointer;padding:14px 16px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+        <span>✏️ Editar ficha funcional completa (Segurança do Trabalho / PPP)</span></summary>
+      <div class="card-b" style="border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn secondary sm" id="s-ia-ficha">🤖 Preencher (colar/foto)</button>
+          <button class="btn sm" id="s-salvar">Salvar ficha</button></div>
+        ${ficha}
+        <div class="muted" style="font-weight:600;margin:18px 0 6px;border-bottom:1px solid var(--border);padding-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+          <span>Segurança do Trabalho / PPP</span>
           <span style="display:flex;gap:6px;align-items:center">${iaAviso}
             <button class="btn secondary sm" id="s-ia-cbo">🤖 Gerar por CBO</button>
             <button class="btn sm" id="s-salvar-2">Salvar</button></span></div>
-          <div class="card-b">${segTrab}</div></div>
+        ${segTrab}
+      </div>
+    </details>
+
+    <div class="detail-grid">
+      <div>
         <div class="card"><div class="card-h">🩺 Ocorrências / BIM (CID) <button class="btn sm" id="s-add-af">＋ Nova ocorrência</button></div>
           <div class="card-b">${afast}</div></div>
+        <div class="card"><div class="card-h">📅 Licenças / afastamentos</div><div class="card-b">${licencas}</div></div>
+        <div class="card"><div class="card-h">💬 Comentários da equipe</div><div class="card-b">
+          <div id="s-coms">${comentarios}</div>
+          <div class="field" style="margin:10px 0 0"><textarea id="s-com-texto" style="min-height:56px" placeholder="Anotação da equipe sobre este servidor…"></textarea></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn sm" id="s-com-add">Adicionar comentário</button></div>
+        </div></div>
       </div>
       <div>
         <div class="card"><div class="card-h">Processos na perícia</div><div class="card-b">${procs}</div></div>
@@ -1171,6 +1238,19 @@ async function renderServidorDetalhe(id) {
     try { await api.post(`/api/servidores/${id}/documentos`, { tipo, nome_orig: arq.name, dados_base64 }); toast('Documento anexado'); renderServidorDetalhe(id); }
     catch (e) { toast(e.message, true); }
   };
+
+  // 💬 Comentários da equipe (anotações livres).
+  document.getElementById('s-com-add').onclick = async () => {
+    const texto = document.getElementById('s-com-texto').value.trim();
+    if (!texto) return toast('Escreva um comentário.', true);
+    try { await api.post(`/api/servidores/${id}/comentarios`, { texto }); toast('Comentário adicionado'); renderServidorDetalhe(id); }
+    catch (e) { toast(e.message, true); }
+  };
+  document.querySelectorAll('[data-delcom]').forEach((b) => { b.onclick = async () => {
+    if (!confirm('Excluir este comentário?')) return;
+    try { await api.del(`/api/servidores/${id}/comentarios/${b.dataset.delcom}`); renderServidorDetalhe(id); }
+    catch (e) { toast(e.message, true); }
+  }; });
 }
 
 // ============================================================

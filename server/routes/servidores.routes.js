@@ -58,6 +58,7 @@ router.get('/:id', (req, res) => {
   ).all(s.id);
   s.afastamentos = db.prepare('SELECT * FROM afastamentos WHERE servidor_id = ? ORDER BY data_inicio DESC, id DESC').all(s.id);
   s.documentos = db.prepare('SELECT id, tipo, nome_orig, criado_em FROM prontuario_docs WHERE servidor_id = ? ORDER BY id DESC').all(s.id);
+  s.comentarios = db.prepare('SELECT id, texto, autor, criado_em FROM servidor_comentarios WHERE servidor_id = ? ORDER BY id DESC').all(s.id);
   // total de dias afastado
   s.total_dias_afastado = s.afastamentos.reduce((t, a) => t + (a.dias || 0), 0);
   res.json(s);
@@ -223,6 +224,21 @@ router.get('/:id/comprovante/:aid', (req, res) => {
   if (!s || !a) return res.status(404).send('Comprovante não encontrado');
   const proc = a.processo_id ? db.prepare('SELECT numero_sei FROM processos WHERE id = ?').get(a.processo_id) : null;
   res.set('Content-Type', 'text/html; charset=utf-8').send(htmlComprovanteServidor(s, a, proc));
+});
+
+// ---- Comentários (notas sobre o servidor) ----
+router.post('/:id/comentarios', (req, res) => {
+  const s = db.prepare('SELECT id FROM servidores WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ erro: 'Servidor não encontrado' });
+  const texto = (req.body?.texto || '').trim();
+  if (!texto) return res.status(400).json({ erro: 'Escreva o comentário' });
+  const info = db.prepare('INSERT INTO servidor_comentarios (servidor_id, texto, autor) VALUES (?, ?, ?)')
+    .run(s.id, texto, req.usuario.nome);
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+router.delete('/:id/comentarios/:cid', (req, res) => {
+  db.prepare('DELETE FROM servidor_comentarios WHERE id = ? AND servidor_id = ?').run(req.params.cid, req.params.id);
+  res.json({ ok: true });
 });
 
 // ---- Prontuário (documentos médicos) ----

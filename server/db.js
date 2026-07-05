@@ -306,6 +306,13 @@ CREATE TABLE IF NOT EXISTS prontuario_docs (
   nome_orig    TEXT,
   criado_em    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS servidor_comentarios (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  servidor_id  INTEGER NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+  texto        TEXT NOT NULL,
+  autor        TEXT,
+  criado_em    TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_afast_serv ON afastamentos(servidor_id);
 CREATE INDEX IF NOT EXISTS idx_proc_serv ON processos(servidor_id);
 `);
