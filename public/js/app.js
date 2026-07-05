@@ -1966,17 +1966,22 @@ async function renderConfigPericia() {
       <div class="field"><label>Horários</label><input id="cp-horario" value="${esc(c.pericia_horario || '')}"></div>
       <div class="field"><label>Texto-padrão do comprovante (uma observação por linha)</label>
         <textarea id="cp-obs" style="min-height:220px;font-size:13px">${esc(c.comprovante_obs || '')}</textarea></div>
+      <div class="field"><label>🔗 Token da Natasha (WhatsApp) — porta de entrada</label>
+        <input id="cp-natasha" type="password" placeholder="${c.natasha_token_definido ? '•••••••• (definido — deixe em branco para manter)' : 'cole aqui o token compartilhado com a Natasha'}" ${c.natasha_travado_env ? 'disabled' : ''}>
+        <span class="muted" style="font-size:12px">A Natasha usa este token no header <code>X-Natasha-Token</code> para entregar os documentos do WhatsApp na Caixa de entrada. ${c.natasha_travado_env ? '(definido por variável de ambiente)' : ''}</span></div>
       <button class="btn" id="cp-salvar">Salvar</button>
       <span class="muted" style="margin-left:10px;font-size:13px">Aparece no rodapé do comprovante ao servidor.</span>
     </div></div>
   `);
   document.getElementById('cp-salvar').onclick = async () => {
     try {
+      const nat = document.getElementById('cp-natasha').value.trim();
       await api.post('/api/config/pericia', {
         pericia_whatsapp: document.getElementById('cp-wa').value,
         pericia_email: document.getElementById('cp-email').value,
         pericia_horario: document.getElementById('cp-horario').value,
         comprovante_obs: document.getElementById('cp-obs').value,
+        ...(nat ? { natasha_token: nat } : {}),
       });
       toast('Configuração da perícia salva');
     } catch (e) { toast(e.message, true); }

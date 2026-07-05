@@ -14,6 +14,9 @@ router.get('/pericia', (req, res) => {
     pericia_whatsapp: getConfig('pericia_whatsapp') || '(21) 96649-5532',
     pericia_email: getConfig('pericia_email') || 'periciamedica@novaiguacu.rj.gov.br',
     pericia_horario: getConfig('pericia_horario') || '08h às 12h (peritos) · 08h às 17h (administrativo, com agendamento)',
+    // Só informa se o token da Natasha já está configurado (não devolve o valor).
+    natasha_token_definido: !!(process.env.NATASHA_TOKEN || getConfig('natasha_token')),
+    natasha_travado_env: !!process.env.NATASHA_TOKEN,
   });
 });
 
@@ -22,6 +25,8 @@ router.post('/pericia', exigirPapel('admin', 'admin_master'), (req, res) => {
   for (const k of ['comprovante_obs', 'pericia_whatsapp', 'pericia_email', 'pericia_horario']) {
     if (b[k] !== undefined) setConfig(k, String(b[k]));
   }
+  // Token da Natasha (só grava se veio preenchido).
+  if (b.natasha_token) setConfig('natasha_token', String(b.natasha_token).trim());
   res.json({ ok: true });
 });
 
