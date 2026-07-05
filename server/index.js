@@ -1,9 +1,12 @@
 import express from 'express';
 import session from 'express-session';
+import SqliteStoreFactory from 'better-sqlite3-session-store';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import './db.js';
+import db from './db.js';
 import { garantirSeed } from './seed.js';
+
+const SqliteStore = SqliteStoreFactory(session);
 
 import authRoutes from './routes/auth.routes.js';
 import usersRoutes from './routes/users.routes.js';
@@ -21,6 +24,8 @@ const app = express();
 app.use(express.json({ limit: '30mb' }));
 app.use(
   session({
+    // Sessão persistida no banco: atualizar/reiniciar o servidor NÃO desloga.
+    store: new SqliteStore({ client: db, expired: { clear: true, intervalMs: 1000 * 60 * 60 } }),
     secret: process.env.APP_SECRET || 'chave-padrao-insegura-troque-me',
     resave: false,
     saveUninitialized: false,

@@ -766,20 +766,23 @@ function ligarAcoes(p, isOper, isPerito) {
     btnDetalhar.textContent = '⏳ Buscando no SEI…';
     try {
       const r = await api.post(`/api/processos/${p.id}/detalhar-sei`);
-      // No SEI real, se o PDF do processo não gerou, mostra o raio-x pra calibrar.
-      if (r.modo === 'sei' && !r.pdfProcesso) {
-        const box = (titulo, t) => t
-          ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
-             <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(t)}</textarea>` : '';
+      const semMeta = r.modo === 'sei' && !r.interessado && !r.tipo && !r.especificacao;
+      const box = (titulo, t) => t
+        ? `<p class="muted" style="margin-top:12px"><b>${titulo}</b></p>
+           <textarea readonly onclick="this.select()" style="height:150px;font-family:ui-monospace,monospace;font-size:12px">${esc(t)}</textarea>` : '';
+      // No SEI real, se faltou o interessado/assunto ou o PDF, mostra a amostra pra calibrar.
+      if (r.modo === 'sei' && (semMeta || !r.pdfProcesso)) {
         await modal({
-          titulo: 'Documentos listados — falta o PDF do processo',
+          titulo: 'Calibração — copie o texto e mande ao suporte',
           okLabel: 'Fechar',
-          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s), mas não consegui gerar o PDF do processo.</p>
-            <p class="muted">👉 Clique no quadro, Ctrl+A, copie e <b>cole no chat do suporte</b>:</p>
-            ${box('Raio-x do processo:', r.amostra) || '<i>Sem amostra.</i>'}`,
+          corpo: `<p>Encontrei <b>${r.documentos}</b> documento(s)${r.pdfProcesso ? ' + PDF' : ''}, mas ${semMeta ? 'não li os dados (interessado/assunto)' : 'não gerei o PDF'}.</p>
+            <p class="muted">👉 Clique no quadro, <b>Ctrl+A</b>, copie e <b>cole no chat do suporte</b>:</p>
+            ${box('Campos da autuação (interessado/assunto):', r.amostraMeta)}
+            ${box('Tela do processo:', r.amostra)}
+            ${!r.amostraMeta && !r.amostra ? '<i>Sem amostra desta vez.</i>' : ''}`,
         });
       } else if (r.modo === 'sei') {
-        toast(`Conteúdo atualizado: ${r.documentos} doc(s) — PDF do processo pronto.`);
+        toast(`Conteúdo atualizado: ${r.documentos} doc(s), dados preenchidos.`);
       } else {
         toast(`Conteúdo atualizado: ${r.documentos} documento(s).`);
       }
