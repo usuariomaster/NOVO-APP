@@ -301,9 +301,10 @@ export async function detalharProcessoNoSei(cfg, dados, mock) {
     const documentos = await coletarDocumentos(page);
     const amostra = await coletarAmostra(page);
     const debug = await salvarDiagnostico(page, `debug-processo`);
-    // Gera o PDF do processo inteiro (para consulta/impressão/prontuário).
+    // Gera o PDF do processo inteiro só se pedido (é pesado; por padrão
+    // arquivamos apenas os metadados + documentos, que é mais leve).
     let pdfProcesso = null;
-    if (dados.dir) {
+    if (dados.dir && dados.genPdf) {
       pdfProcesso = await gerarPdfProcesso(page, dados.dir, dados.processoId);
     }
     // Metadados por último: navega para a autuação (Consultar/Alterar).

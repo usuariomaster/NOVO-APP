@@ -207,6 +207,21 @@ garantirColuna('sei_config', 'unidade_destino', 'unidade_destino TEXT');
 // Assinatura nativa do SEI (assina o despacho com a senha do SEI)
 garantirColuna('sei_config', 'assinar', 'assinar INTEGER NOT NULL DEFAULT 1');
 garantirColuna('sei_config', 'cargo', 'cargo TEXT');
+// Gerar o PDF do processo inteiro ao buscar conteúdo (pesado). Padrão: não
+// (arquivamos os metadados + documentos, que é mais leve).
+garantirColuna('sei_config', 'gerar_pdf', 'gerar_pdf INTEGER NOT NULL DEFAULT 0');
+// Data de entrada do processo na perícia (para prazos) e tipo da perícia
+garantirColuna('processos', 'data_entrada', 'data_entrada TEXT');
+
+// Padrões pessoais de despacho do perito
+db.exec(`
+CREATE TABLE IF NOT EXISTS padroes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  titulo      TEXT NOT NULL,
+  texto       TEXT NOT NULL,
+  criado_em   TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 
 export function registrarHistorico({ processoId, usuario, acao, detalhe }) {
   db.prepare(

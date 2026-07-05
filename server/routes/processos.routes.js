@@ -43,7 +43,7 @@ const SELECT_PROC = `
 
 // Lista de processos, filtrada conforme o papel.
 router.get('/', (req, res) => {
-  const { status, q } = req.query;
+  const { status, q, tipo } = req.query;
   const where = [];
   const params = [];
 
@@ -55,6 +55,10 @@ router.get('/', (req, res) => {
   if (status) {
     where.push('p.status = ?');
     params.push(status);
+  }
+  if (tipo) {
+    where.push('p.tipo = ?');
+    params.push(tipo);
   }
   if (q) {
     where.push('(p.numero_sei LIKE ? OR p.interessado LIKE ? OR p.especificacao LIKE ?)');
@@ -272,7 +276,11 @@ router.post('/:id/detalhar-sei', exigirPapel('operador', 'admin'), async (req, r
 
   let r;
   try {
-    r = await detalharProcessoNoSei(montarCfg(cfgRow), { processoId: proc.id, numeroSei: proc.numero_sei, dir: dirProc }, mock);
+    r = await detalharProcessoNoSei(
+      montarCfg(cfgRow),
+      { processoId: proc.id, numeroSei: proc.numero_sei, dir: dirProc, genPdf: cfgRow?.gerar_pdf === 1 },
+      mock
+    );
   } catch (e) {
     return res.status(502).json({ erro: e.message, debug: e.debug || null });
   }

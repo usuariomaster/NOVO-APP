@@ -29,6 +29,7 @@ const STATUS = {
   concluido: 'Concluído',
 };
 const PRIORIDADES = ['baixa', 'normal', 'alta', 'urgente'];
+const TIPOS_PERICIA = ['Contestação de atestados', 'Prestação de informações', 'Reconsideração', 'Revisão', 'Readaptação', 'Perícia médica', 'Outros'];
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -202,7 +203,7 @@ function renderLogin() {
 // Calcula o farol de prazo de um processo.
 function farol(p, cfg) {
   if (['concluido', 'enviado_sei'].includes(p.status)) return { cor: '', dot: '✔', label: 'concluído', dias: null };
-  const ref = p.distribuido_em || p.criado_em;
+  const ref = p.distribuido_em || p.data_entrada || p.criado_em;
   if (!ref) return { cor: 'v', dot: '🟢', label: '—', dias: 0 };
   const d = new Date(ref.replace(' ', 'T') + (ref.includes('T') ? '' : 'Z'));
   const dias = Math.floor((Date.now() - d.getTime()) / 86400000);
@@ -317,6 +318,10 @@ async function renderProcessos() {
         <option value="">Todos os status</option>
         ${Object.entries(STATUS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
       </select>
+      <select id="filtro-tipo">
+        <option value="">Todos os tipos</option>
+        ${TIPOS_PERICIA.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+      </select>
     </div>
     <div class="card"><div id="lista-proc"><div class="empty">Carregando…</div></div></div>
   `);
@@ -345,17 +350,20 @@ async function renderProcessos() {
   }
   const busca = document.getElementById('busca');
   const filtro = document.getElementById('filtro-status');
-  const recarregar = () => carregarLista(busca.value, filtro.value);
+  const filtroTipo = document.getElementById('filtro-tipo');
+  const recarregar = () => carregarLista(busca.value, filtro.value, filtroTipo.value);
   let deb;
   busca.oninput = () => { clearTimeout(deb); deb = setTimeout(recarregar, 300); };
   filtro.onchange = recarregar;
-  carregarLista('', '');
+  filtroTipo.onchange = recarregar;
+  carregarLista('', '', '');
 }
 
-async function carregarLista(q, status) {
+async function carregarLista(q, status, tipo) {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (status) params.set('status', status);
+  if (tipo) params.set('tipo', tipo);
   const procs = await api.get('/api/processos?' + params.toString());
   const cont = document.getElementById('lista-proc');
   if (!cont) return;
@@ -395,7 +403,7 @@ async function carregarLista(q, status) {
       const ok = await modal({ titulo: 'Excluir processo', okLabel: 'Excluir', okClasse: 'btn danger',
         corpo: `<p>Excluir este processo do controle? (não afeta o SEI)</p>` });
       if (!ok) return;
-      try { await api.del('/api/processos/' + b.dataset.del); toast('Processo excluído'); carregarLista(q, status); }
+      try { await api.del('/api/processos/' + b.dataset.del); toast('Processo excluído'); carregarLista(q, status, tipo); }
       catch (err) { toast(err.message, true); }
     };
   });
@@ -438,7 +446,7 @@ async function extrairDoSei() {
     } else {
       toast(`Extração concluída${aviso}: ${r.novos} novo(s), ${r.ignorados} já existente(s).`);
     }
-    carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value);
+    carregarLista(document.getElementById('busca').value, document.getElementById('filtro-status').value, document.getElementById('filtro-tipo')?.value || '');
   } catch (err) {
     // Se o robô devolveu um print do que viu (falha no SEI real), mostra.
     const debug = err.dados?.debug;
@@ -596,7 +604,8 @@ async function renderProcessoDetalhe(id) {
               <dt>Interessado</dt><dd>${esc(p.interessado || '—')}</dd>
               <dt>Especificação</dt><dd>${esc(p.especificacao || '—')}</dd>
               <dt>Origem</dt><dd>${esc(p.unidade_origem || '—')}</dd>
-              <dt>Autuação</dt><dd>${esc(p.data_autuacao || '—')}</dd>
+              <dt>Entrada na perícia</dt><dd>${esc(p.data_entrada || '—')}</dd>
+              <dt>Autuação (SEI)</dt><dd>${esc(p.data_autuacao || '—')}</dd>
               <dt>Perito</dt><dd>${esc(p.perito_nome || '—')}</dd>
               <dt>Prazo</dt><dd>${esc(p.prazo || '—')}</dd>
             </dl>
@@ -644,7 +653,15 @@ function renderAreaDespacho(p, isOper, isPerito) {
             </select>
           </div>
           <div class="field">
-            <label>Texto do despacho</label>
+            <label>Meus padrões de despacho</label>
+            <div class="row" style="align-items:center;gap:8px">
+              <select id="d-padrao" style="flex:2"><option value="">— escolher um padrão —</option></select>
+              <button class="btn secondary sm" id="d-inserir-padrao">Inserir</button>
+              <button class="btn secondary sm" id="d-salvar-padrao">💾 Salvar atual</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Texto do despacho <span class="muted" style="font-weight:400">— processo ${esc(p.numero_sei)}</span></label>
             <textarea id="d-texto" placeholder="Redija aqui o despacho…">${esc(d?.texto || '')}</textarea>
           </div>
           <div class="field">
@@ -743,8 +760,10 @@ function ligarAcoes(p, isOper, isPerito) {
       titulo: 'Editar processo',
       okLabel: 'Salvar',
       corpo: `
-        <div class="field"><label>Tipo</label><input name="tipo" value="${esc(p.tipo || '')}"></div>
-        <div class="field"><label>Interessado</label><input name="interessado" value="${esc(p.interessado || '')}"></div>
+        <div class="field"><label>Tipo de processo</label>
+          <input name="tipo" list="tipos-list" value="${esc(p.tipo || '')}" placeholder="ex.: Contestação de atestados">
+          <datalist id="tipos-list">${TIPOS_PERICIA.map((t) => `<option value="${esc(t)}">`).join('')}</datalist></div>
+        <div class="field"><label>Interessado / Servidor</label><input name="interessado" value="${esc(p.interessado || '')}"></div>
         <div class="field"><label>Especificação</label><input name="especificacao" value="${esc(p.especificacao || '')}"></div>
         <div class="row">
           <div class="field"><label>Prioridade</label><select name="prioridade">
@@ -887,6 +906,31 @@ function ligarAcoes(p, isOper, isPerito) {
     toast('Processo concluído');
     recarrega();
   };
+
+  // Perito: padrões pessoais de despacho
+  const selPadrao = document.getElementById('d-padrao');
+  if (selPadrao) {
+    (async () => {
+      const padroes = await api.get('/api/padroes').catch(() => []);
+      selPadrao._padroes = padroes;
+      selPadrao.insertAdjacentHTML('beforeend', padroes.map((x) => `<option value="${x.id}">${esc(x.titulo)}</option>`).join(''));
+    })();
+    document.getElementById('d-inserir-padrao').onclick = () => {
+      const pad = (selPadrao._padroes || []).find((x) => String(x.id) === selPadrao.value);
+      if (!pad) return toast('Escolha um padrão', true);
+      const ta = document.getElementById('d-texto');
+      ta.value = (ta.value ? ta.value + '\n' : '') + pad.texto;
+    };
+    document.getElementById('d-salvar-padrao').onclick = async () => {
+      const texto = document.getElementById('d-texto').value.trim();
+      if (!texto) return toast('Escreva o despacho antes de salvar como padrão', true);
+      const r = await modal({ titulo: 'Salvar padrão pessoal', okLabel: 'Salvar',
+        corpo: `<div class="field"><label>Título do padrão</label><input name="titulo" placeholder="ex.: Deferimento padrão"></div>` });
+      if (!r || !r.titulo) return;
+      try { await api.post('/api/padroes', { titulo: r.titulo, texto }); toast('Padrão salvo'); recarrega(); }
+      catch (e) { toast(e.message, true); }
+    };
+  }
 
   // Perito: salvar / enviar despacho
   const btnSalvar = document.getElementById('btn-salvar-despacho');
@@ -1217,10 +1261,11 @@ async function renderConfigSei() {
         </div>
         <div class="field"><label>Enviar processo à unidade (opcional)</label><input name="unidade_destino" placeholder="ex.: SEMUS ou sigla da unidade de destino"></div>
         <div class="field"><label><input type="checkbox" name="assinar" checked style="width:auto"> Assinar o despacho no SEI automaticamente (com a senha do SEI)</label></div>
-        <div class="field"><label>Cargo/Função para assinatura (se o SEI pedir)</label><input name="cargo" placeholder="ex.: Perito Médico"></div>`,
+        <div class="field"><label>Cargo/Função para assinatura (se o SEI pedir)</label><input name="cargo" placeholder="ex.: Perito Médico"></div>
+        <div class="field"><label><input type="checkbox" name="gerar_pdf" style="width:auto"> Gerar PDF do processo inteiro ao buscar conteúdo (mais lento; por padrão salvamos só os metadados)</label></div>`,
     });
     if (!r) return;
-    try { await api.post('/api/sei/config', { ...r, padrao: 1, assinar: !!r.assinar }); toast('Configuração salva'); renderConfigSei(); }
+    try { await api.post('/api/sei/config', { ...r, padrao: 1, assinar: !!r.assinar, gerar_pdf: !!r.gerar_pdf }); toast('Configuração salva'); renderConfigSei(); }
     catch (e) { toast(e.message, true); }
   };
   document.querySelectorAll('[data-del]').forEach((b) => {

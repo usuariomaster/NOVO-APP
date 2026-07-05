@@ -48,7 +48,7 @@ router.get('/config', exigirPapel('admin'), (req, res) => {
 router.post('/config', exigirPapel('admin'), (req, res) => {
   const {
     apelido, base_url, orgao, unidade, usuario, senha, padrao,
-    escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo,
+    escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo, gerar_pdf,
   } = req.body || {};
   if (!apelido || !base_url || !usuario || !senha) {
     return res.status(400).json({ erro: 'Informe apelido, URL base, usuário e senha' });
@@ -58,8 +58,8 @@ router.post('/config', exigirPapel('admin'), (req, res) => {
     .prepare(
       `INSERT INTO sei_config
          (apelido, base_url, orgao, unidade, usuario, senha_cripto, padrao,
-          escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          escrita, tipo_documento, nivel_acesso, unidade_destino, assinar, cargo, gerar_pdf)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       apelido.trim(),
@@ -74,7 +74,8 @@ router.post('/config', exigirPapel('admin'), (req, res) => {
       (nivel_acesso || 'publico').trim(),
       unidade_destino || null,
       assinar === false ? 0 : 1,
-      cargo || null
+      cargo || null,
+      gerar_pdf ? 1 : 0
     );
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -116,8 +117,8 @@ router.post('/extrair', exigirPapel('operador', 'admin'), async (req, res) => {
 
   // Persiste: insere novos, ignora já existentes (por numero_sei)
   const inserirProc = db.prepare(
-    `INSERT INTO processos (numero_sei, tipo, interessado, especificacao, data_autuacao, unidade_origem, link_sei, status, operador_id)
-     VALUES (@numero_sei, @tipo, @interessado, @especificacao, @data_autuacao, @unidade_origem, @link_sei, 'em_controle', @operador_id)`
+    `INSERT INTO processos (numero_sei, tipo, interessado, especificacao, data_autuacao, unidade_origem, link_sei, status, operador_id, data_entrada)
+     VALUES (@numero_sei, @tipo, @interessado, @especificacao, @data_autuacao, @unidade_origem, @link_sei, 'em_controle', @operador_id, date('now'))`
   );
   const inserirDoc = db.prepare(
     `INSERT INTO documentos (processo_id, numero, tipo, data, link_sei) VALUES (?, ?, ?, ?, ?)`

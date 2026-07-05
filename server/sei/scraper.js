@@ -296,43 +296,69 @@ async function unidadeAtual(page) {
 }
 
 // Abre o "Trocar Unidade" e lista as unidades que o usuário pode acessar.
+// Retorna { unidades:[{nome,href}], debug } — debug é uma amostra da tela.
 async function listarUnidades(page) {
   let abriu = false;
   for (const f of page.frames()) {
     try {
-      const link = f.locator('#lnkInfraUnidade, a[href*="infra_trocar_unidade"]').first();
+      const link = f.locator('#lnkInfraUnidade, a[href*="infra_trocar_unidade"], a[onclick*="trocar_unidade"], a[href*="infra_unidade_trocar"]').first();
       if (await link.count()) { await link.click({ timeout: 10000 }); abriu = true; break; }
     } catch { /* ignora */ }
   }
-  if (!abriu) return [];
+  if (!abriu) return { unidades: [], debug: 'Não encontrei o seletor de unidade.' };
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1200);
+
+  let debug = '';
+  const unidades = [];
+  const vistos = new Set();
   for (const f of page.frames()) {
+    let anchors = [];
     try {
-      const us = await f.$$eval('a', (els) =>
-        els
-          .map((e) => ({ nome: (e.textContent || '').trim(), href: e.href || '' }))
-          .filter((x) => x.nome && /id_unidade=/.test(x.href) && x.nome.length <= 60)
+      anchors = await f.$$eval('a', (els) =>
+        els.map((e) => ({
+          t: (e.textContent || '').trim(),
+          h: (e.getAttribute('href') || '').slice(0, 160),
+          o: (e.getAttribute('onclick') || '').slice(0, 160),
+          abs: e.href || '',
+        })).filter((x) => x.t || x.h || x.o)
       );
-      if (us.length) {
-        const vistos = new Set();
-        return us.filter((u) => (vistos.has(u.nome) ? false : vistos.add(u.nome)));
+    } catch { continue; }
+    if (!anchors.length) continue;
+    debug += `--- ${f.url().slice(0, 70)} ---\n` +
+      anchors.slice(0, 50).map((a) => `${a.t}  =>  ${a.h || a.o}`).join('\n') + '\n\n';
+    for (const a of anchors) {
+      const alvo = a.h + ' ' + a.o;
+      if (/trocar_unidade|id_unidade|unidade_trocar/i.test(alvo) && a.t && a.t.length <= 60 && !vistos.has(a.t)) {
+        vistos.add(a.t);
+        unidades.push({ nome: a.t, href: /^https?:/.test(a.abs) ? a.abs : '' });
       }
-    } catch { /* ignora */ }
+    }
   }
-  return [];
+  return { unidades, debug: debug.slice(0, 6000) };
 }
 
-// Troca para a unidade informada (o link carrega o hash de sessão).
+// Troca para a unidade informada (clica no link dela na tela de troca).
 async function trocarUnidade(page, unidade) {
-  try {
-    await page.goto(unidade.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(1200);
-    return true;
-  } catch {
-    return false;
+  for (const f of page.frames()) {
+    try {
+      const link = f.locator(`a:has-text("${unidade.nome}")`).first();
+      if (await link.count()) {
+        await link.click({ timeout: 10000 });
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(1200);
+        return true;
+      }
+    } catch { /* tenta o próximo quadro */ }
   }
+  if (unidade.href) {
+    try {
+      await page.goto(unidade.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(1200);
+      return true;
+    } catch { /* ignora */ }
+  }
+  return false;
 }
 
 // API pública: extrai os processos de TODAS as unidades permitidas.
@@ -362,14 +388,15 @@ export async function extrairProcessos(cfg, mock) {
     porUnidade[nomeAtual] = r1.processos.length;
 
     // 2) Demais unidades permitidas.
-    const unidades = await listarUnidades(page);
+    const { unidades, debug: debugUnidades } = await listarUnidades(page);
+    try { fs.writeFileSync(join(DIR_DIAG, 'debug-unidades.txt'), `Unidade atual: ${nomeAtual}\nEncontradas: ${unidades.map((u) => u.nome).join(' | ') || '(nenhuma)'}\n\n${debugUnidades}`, 'utf8'); } catch { /* ignora */ }
     for (const u of unidades) {
       if (u.nome === nomeAtual) continue;
       const ok = await trocarUnidade(page, u);
       if (!ok) continue;
       const r = await extrairControleProcessos(page, u.nome);
       for (const p of r.processos) todos.push(p);
-      porUnidade[u.nome] = r.processos.length;
+      porUnidade[u.nome] = (porUnidade[u.nome] || 0) + r.processos.length;
     }
 
     const debug = await salvarDiagnostico(page, 'debug-controle');
