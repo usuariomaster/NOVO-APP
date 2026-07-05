@@ -100,6 +100,56 @@ export function htmlBIM(s, a, proc) {
   </body></html>`;
 }
 
+// ---- RAI — Relatório de Avaliação de Incapacidade (laudo da Junta) ----
+export function htmlRAI(j, s, dossie = {}) {
+  let peritos = [];
+  try { peritos = JSON.parse(j.peritos || '[]'); } catch { peritos = []; }
+  const afast = (dossie.afastamentos || []).map((a) =>
+    `<tr><td>${dbr(a.data_inicio)}</td><td>${dbr(a.data_fim)}</td><td>${esc(a.dias ?? '—')}</td><td>${esc(a.cid || '—')}</td><td>${esc(a.tipo || '—')}</td><td>${esc(a.conclusao || '—')}</td></tr>`
+  ).join('') || '<tr><td colspan="6">—</td></tr>';
+  const procs = (dossie.processos || []).map((p) =>
+    `<tr><td>${esc(p.numero_sei)}</td><td>${esc(p.especificacao || p.tipo || '—')}</td><td>${esc(p.status || '—')}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>';
+  const assinaturas = (peritos.length ? peritos : [{ nome: '', crm: '' }, { nome: '', crm: '' }, { nome: '', crm: '' }])
+    .map((p) => `<div class="assp"><div class="linha">${esc(p.nome || '')}</div><div class="crm">CRM ${esc(p.crm || '____')}</div></div>`).join('');
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+    <title>RAI — ${esc(s.nome)}</title>
+    <style>body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:32px;font-size:13px;line-height:1.55}
+    ${TIMBRE_CSS} h1{font-size:15px;text-align:center;margin:0 0 4px} .sub{text-align:center;color:#555;font-size:12px;margin-bottom:16px}
+    dl{display:grid;grid-template-columns:170px 1fr;gap:4px 12px;font-size:13px;margin:12px 0}dt{color:#555;font-weight:600}
+    h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #bbb;padding-bottom:3px;margin:22px 0 8px}
+    table{width:100%;border-collapse:collapse;margin:6px 0}th,td{border:1px solid #999;padding:4px 7px;font-size:11.5px;text-align:left}th{background:#eef2f4}
+    .rel{white-space:pre-wrap;text-align:justify;margin:8px 0}
+    .assin{display:flex;flex-wrap:wrap;gap:30px;justify-content:center;margin-top:60px}
+    .assp{text-align:center;min-width:230px}.assp .linha{border-top:1px solid #000;padding-top:5px}.assp .crm{font-size:11px;color:#555}
+    .foot{margin-top:26px;text-align:center;font-size:11px;color:#444;border-top:1px solid #ccc;padding-top:8px}
+    @media print{.noprint{display:none}body{margin:10mm}}</style></head><body>
+    ${timbreHTML('Junta Médica Pericial — Aposentadoria por Incapacidade')}
+    <h1>RELATÓRIO DE AVALIAÇÃO DE INCAPACIDADE (RAI)</h1>
+    <div class="sub">${esc(j.tipo || 'Aposentadoria por incapacidade')}${j.processo_numero ? ' · Processo ' + esc(j.processo_numero) : ''}</div>
+    <dl>
+      <dt>Nome</dt><dd><b>${esc(s.nome)}</b></dd>
+      <dt>Cargo / Matrícula</dt><dd>${esc(s.cargo)} · ${esc(s.matricula)}</dd>
+      <dt>Endereço</dt><dd>${esc([s.endereco, s.numero_ende, s.bairro, s.municipio].filter(Boolean).join(', ') || '—')}</dd>
+      <dt>Prontuário atual</dt><dd>${esc(j.prontuario_atual || s.prontuario || '—')}</dd>
+      <dt>Prontuário anterior</dt><dd>${esc(j.prontuario_anterior || '—')}</dd>
+      <dt>Data da reunião</dt><dd>${dbr(j.data_reuniao)}</dd>
+      <dt>Médico assistente</dt><dd>${esc(j.medico_assistente || '—')}${j.crm_assistente ? ' — CRM ' + esc(j.crm_assistente) : ''}</dd>
+      <dt>CID(s)</dt><dd>${esc(j.cids || '—')}</dd>
+    </dl>
+    <h2>Parecer médico pericial / Relatório da incapacidade</h2>
+    <div class="rel">${esc(j.relatorio || '')}</div>
+    <p><b>Conclusão da Junta:</b> ${esc(j.conclusao || '—')}</p>
+    <h2>Histórico de afastamentos</h2>
+    <table><thead><tr><th>Início</th><th>Fim</th><th>Dias</th><th>CID</th><th>Tipo</th><th>Decisão</th></tr></thead><tbody>${afast}</tbody></table>
+    <h2>Processos na perícia</h2>
+    <table><thead><tr><th>Processo</th><th>Assunto</th><th>Status</th></tr></thead><tbody>${procs}</tbody></table>
+    <h2>Composição da Junta Médica Pericial</h2>
+    <div class="assin">${assinaturas}</div>
+    <div class="foot">Estado do Rio de Janeiro · Prefeitura Municipal de Nova Iguaçu · Secretaria Municipal de Saúde — SEMUS · Junta Médica Oficial</div>
+    <div class="noprint" style="text-align:center;margin-top:24px"><button onclick="print()" style="padding:10px 22px;font-size:15px">🖨 Imprimir RAI</button></div>
+  </body></html>`;
+}
+
 // ---- Comprovante ao servidor (resposta oficial, com o texto-padrão) ----
 export function htmlComprovanteServidor(s, a, proc) {
   const nat = String(a.natureza || '').toLowerCase();

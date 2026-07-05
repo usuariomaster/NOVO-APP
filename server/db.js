@@ -329,6 +329,30 @@ for (const [nome, ddl] of [
   garantirColuna('servidores', nome, ddl);
 }
 
+// Junta Médica: avaliação colegiada (aposentadoria por incapacidade, revisão,
+// readaptação, divergência). Produz o RAI (Relatório de Avaliação de Incapacidade).
+db.exec(`
+CREATE TABLE IF NOT EXISTS juntas (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  servidor_id        INTEGER REFERENCES servidores(id) ON DELETE CASCADE,
+  processo_id        INTEGER REFERENCES processos(id) ON DELETE SET NULL,
+  tipo               TEXT,           -- Aposentadoria por incapacidade / Revisão / Readaptação / Divergência
+  data_reuniao       TEXT,
+  prontuario_atual   TEXT,
+  prontuario_anterior TEXT,
+  medico_assistente  TEXT,
+  crm_assistente     TEXT,
+  cids               TEXT,
+  relatorio          TEXT,           -- relatório/parecer médico da incapacidade
+  conclusao          TEXT,           -- Concede / Nega / Diligência
+  peritos            TEXT,           -- JSON [{nome, crm}]
+  status             TEXT NOT NULL DEFAULT 'aberta' CHECK (status IN ('aberta','concluida')),
+  criado_por         TEXT,
+  criado_em          TEXT NOT NULL DEFAULT (datetime('now')),
+  concluida_em       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_junta_serv ON juntas(servidor_id);`);
+
 // Padrões pessoais de despacho do perito
 db.exec(`
 CREATE TABLE IF NOT EXISTS padroes (

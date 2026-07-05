@@ -102,6 +102,7 @@ const rotas = {
   '#arquivo': renderArquivo,
   '#servidores': renderServidores,
   '#ocorrencias': renderOcorrencias,
+  '#juntas': renderJuntas,
   '#mensageiro': renderMensageiro,
   '#usuarios': renderUsuarios,
   '#sei': renderConfigSei,
@@ -114,6 +115,8 @@ async function navegar() {
     ? () => renderProcessoDetalhe(hash.split('/')[1])
     : hash.startsWith('#servidor/')
     ? () => renderServidorDetalhe(hash.split('/')[1])
+    : hash.startsWith('#junta/')
+    ? () => renderJuntaDetalhe(hash.split('/')[1])
     : (rotas[hash] || renderPainel);
   try {
     await fn();
@@ -143,12 +146,14 @@ function shell(conteudo) {
   const nav = (isPerito ? [
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#processos">📋 Meus casos</a>`,
+    `<a href="#juntas">⚖️ Junta Médica</a>`,
     `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
   ] : [
     `<a href="#painel">📊 Painel</a>`,
     `<a href="#caixa">📥 Caixa de entrada <span class="badge-caixa"></span></a>`,
     `<a href="#fila">🗓️ Fila do dia</a>`,
     `<a href="#servidores">🧑‍⚕️ Servidores</a>`,
+    `<a href="#juntas">⚖️ Junta Médica</a>`,
     isOper ? `<a href="#mensageiro">🚚 Malote</a>` : '',
     `<a href="#arquivo">🗄️ Arquivo</a>`,
     isAdmin ? `<a href="#usuarios">👥 Usuários &amp; Peritos</a>` : '',
@@ -701,6 +706,137 @@ async function renderOcorrencias() {
   let deb; document.getElementById('oc-busca').oninput = (e) => { clearTimeout(deb); deb = setTimeout(() => desenhar(e.target.value.trim()), 300); };
 }
 
+// ============================================================
+// Junta Médica — avaliação colegiada + laudo RAI
+// ============================================================
+const TIPOS_JUNTA = ['Aposentadoria por incapacidade', 'Revisão de benefício', 'Readaptação', 'Divergência de laudos', 'Invalidez'];
+
+async function renderJuntas() {
+  shell('<div class="empty">Carregando…</div>');
+  const lista = await api.get('/api/juntas');
+  setMain(`
+    <div class="page-head"><div>
+      <h2>⚖️ Junta Médica</h2>
+      <div class="desc">Avaliações colegiadas (aposentadoria por incapacidade, revisão, divergência) e o laudo RAI.</div>
+    </div>
+    <button class="btn" id="j-nova">＋ Formar junta</button></div>
+    <div class="card"><div id="j-lista">${lista.length ? `<table>
+      <thead><tr><th>Servidor</th><th>Tipo</th><th>Reunião</th><th>Conclusão</th><th>Status</th><th></th></tr></thead>
+      <tbody>${lista.map((j) => `<tr data-id="${j.id}" style="cursor:pointer">
+        <td><b>${esc(j.servidor_nome || '—')}</b></td><td>${esc(j.tipo || '—')}</td>
+        <td class="muted">${dataBR(j.data_reuniao)}</td><td>${esc(j.conclusao || '—')}</td>
+        <td><span class="canal ${j.status === 'concluida' ? 'wa' : 'fis'}">${j.status === 'concluida' ? 'Concluída' : 'Aberta'}</span></td>
+        <td><a class="btn secondary sm" href="/api/juntas/${j.id}/laudo" target="_blank" rel="noopener" onclick="event.stopPropagation()">📄 RAI</a></td>
+      </tr>`).join('')}</tbody></table>` : '<div class="empty">Nenhuma junta. Clique em "Formar junta" ou use "Formar Junta" na ficha do servidor.</div>'}</div></div>
+  `);
+  document.querySelectorAll('#j-lista tr[data-id]').forEach((tr) => tr.onclick = () => (location.hash = `#junta/${tr.dataset.id}`));
+  document.getElementById('j-nova').onclick = async () => {
+    const servs = await api.get('/api/servidores');
+    if (!servs.length) return toast('Cadastre um servidor primeiro.', true);
+    const r = await modal({ titulo: 'Formar junta médica', okLabel: 'Criar', corpo: `
+      <div class="field"><label>Servidor</label><select name="servidor_id">${servs.map((s) => `<option value="${s.id}">${esc(s.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Tipo</label><select name="tipo">${TIPOS_JUNTA.map((t) => `<option>${t}</option>`).join('')}</select></div>
+      <div class="field"><label>Data da reunião</label><input name="data_reuniao" type="date"></div>` });
+    if (!r || !r.servidor_id) return;
+    try { const c = await api.post('/api/juntas', r); toast('Junta criada'); location.hash = `#junta/${c.id}`; }
+    catch (e) { toast(e.message, true); }
+  };
+}
+
+async function renderJuntaDetalhe(id) {
+  shell('<div class="empty">Carregando…</div>');
+  let j;
+  try { j = await api.get('/api/juntas/' + id); } catch (e) { setMain(`<div class="card"><div class="empty">${esc(e.message)}</div></div>`); return; }
+  const s = j.servidor || {};
+  const peritosCad = await api.get('/api/juntas/peritos').catch(() => []);
+  const af = j.dossie.afastamentos;
+  const totalDias = af.reduce((t, a) => t + (a.dias || 0), 0);
+
+  const dossieAfast = af.length ? `<table><thead><tr><th>Início</th><th>Fim</th><th>Dias</th><th>CID</th><th>Tipo</th><th>Decisão</th></tr></thead>
+    <tbody>${af.map((a) => `<tr><td>${dataBR(a.data_inicio)}</td><td>${dataBR(a.data_fim)}</td><td>${a.dias ?? '—'}</td><td><b>${esc(a.cid || '—')}</b></td><td>${esc(a.tipo || '—')}</td><td>${esc(a.conclusao || '—')}</td></tr>`).join('')}</tbody></table>`
+    : '<span class="muted">Sem afastamentos registrados.</span>';
+  const dossieProc = j.dossie.processos.length ? j.dossie.processos.map((p) => `<div style="padding:5px 0;border-bottom:1px solid var(--border)"><span class="num-proc">${esc(p.numero_sei)}</span> <span class="muted">${esc(p.especificacao || p.tipo || '')}</span></div>`).join('') : '<span class="muted">—</span>';
+
+  // Composição: até 3+ peritos, escolhidos dos cadastrados ou digitados.
+  const linhaPerito = (p = {}, i) => `<div class="row" style="gap:8px">
+    <input data-pnome="${i}" placeholder="Nome do perito" value="${esc(p.nome || '')}" list="peritos-dl" style="flex:2">
+    <input data-pcrm="${i}" placeholder="CRM" value="${esc(p.crm || '')}" style="flex:1">
+  </div>`;
+  const peritos = j.peritos.length ? j.peritos : [{}, {}, {}];
+
+  setMain(`
+    <div class="page-head"><div>
+      <a href="#juntas" class="muted">← juntas</a>
+      <h2 style="margin-top:4px">⚖️ ${esc(s.nome || 'Junta')}</h2>
+      <div class="desc">${esc(j.tipo || '')} • ${af.length} afastamento(s) • ${totalDias} dia(s) • ${j.status === 'concluida' ? 'Concluída' : 'Aberta'}</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a class="btn" href="/api/juntas/${id}/laudo" target="_blank" rel="noopener">📄 Laudo RAI</a>
+      <button class="btn secondary" id="j-salvar">Salvar</button>
+    </div></div>
+    <datalist id="peritos-dl">${peritosCad.map((p) => `<option value="${esc(p.nome)}">CRM ${esc(p.crm || '')}</option>`).join('')}</datalist>
+    <div class="detail-grid">
+      <div>
+        <div class="card"><div class="card-h">Laudo da incapacidade (RAI)</div><div class="card-b">
+          <div class="row"><div class="field"><label>Tipo</label><select data-jc="tipo">${TIPOS_JUNTA.map((t) => `<option ${j.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+            <div class="field"><label>Data da reunião</label><input data-jc="data_reuniao" type="date" value="${esc(j.data_reuniao || '')}"></div></div>
+          <div class="row"><div class="field"><label>Prontuário atual</label><input data-jc="prontuario_atual" value="${esc(j.prontuario_atual || s.prontuario || '')}"></div>
+            <div class="field"><label>Prontuário anterior</label><input data-jc="prontuario_anterior" value="${esc(j.prontuario_anterior || '')}"></div></div>
+          <div class="row"><div class="field"><label>Médico assistente</label><input data-jc="medico_assistente" value="${esc(j.medico_assistente || '')}"></div>
+            <div class="field"><label>CRM assistente</label><input data-jc="crm_assistente" value="${esc(j.crm_assistente || '')}"></div></div>
+          <div class="field"><label>CID(s)</label><input data-jc="cids" value="${esc(j.cids || '')}" placeholder="ex.: F41.1, F32.2"></div>
+          <div class="field"><label>Relatório médico da incapacidade</label>
+            <textarea data-jc="relatorio" style="min-height:200px" placeholder="REUNIDA A JMP NA DATA DE…, ANALISAMOS TODO O PRONTUÁRIO…">${esc(j.relatorio || '')}</textarea></div>
+          <div class="row"><div class="field"><label>Conclusão</label><input data-jc="conclusao" list="jconc" value="${esc(j.conclusao || '')}" placeholder="Concede aposentadoria por incapacidade / Nega / Diligência">
+            <datalist id="jconc"><option value="Concede aposentadoria por incapacidade"><option value="Nega o pedido"><option value="Diligência"><option value="Readaptação"></datalist></div></div>
+        </div></div>
+      </div>
+      <div>
+        <div class="card"><div class="card-h">Composição da Junta <button class="btn sm" id="j-add-perito">＋ perito</button></div>
+          <div class="card-b" id="j-peritos">${peritos.map(linhaPerito).join('')}</div></div>
+        <div class="card"><div class="card-h">Dossiê — afastamentos</div><div class="card-b">${dossieAfast}</div></div>
+        <div class="card"><div class="card-h">Dossiê — processos</div><div class="card-b">${dossieProc}</div></div>
+        <div class="card"><div class="card-b" style="display:flex;gap:8px;align-items:center">
+          <button class="btn ${j.status === 'concluida' ? 'secondary' : ''}" id="j-status">${j.status === 'concluida' ? '↩️ Reabrir junta' : '✔ Concluir junta'}</button>
+          <button class="btn danger sm" id="j-del">🗑 Excluir</button>
+        </div></div>
+      </div>
+    </div>
+  `);
+
+  const coletar = () => {
+    const c = {};
+    document.querySelectorAll('[data-jc]').forEach((el) => c[el.dataset.jc] = el.value);
+    const per = [];
+    document.querySelectorAll('#j-peritos .row').forEach((row, i) => {
+      const nome = row.querySelector(`[data-pnome="${i}"]`)?.value.trim();
+      const crm = row.querySelector(`[data-pcrm="${i}"]`)?.value.trim();
+      if (nome) per.push({ nome, crm });
+    });
+    c.peritos = per;
+    return c;
+  };
+  const salvar = async (extra = {}) => {
+    try { await api.put('/api/juntas/' + id, { ...coletar(), ...extra }); toast('Junta salva'); }
+    catch (e) { toast(e.message, true); }
+  };
+  document.getElementById('j-salvar').onclick = () => salvar();
+  document.getElementById('j-add-perito').onclick = () => {
+    const box = document.getElementById('j-peritos');
+    const i = box.querySelectorAll('.row').length;
+    box.insertAdjacentHTML('beforeend', linhaPerito({}, i));
+  };
+  document.getElementById('j-status').onclick = async () => {
+    await salvar({ status: j.status === 'concluida' ? 'aberta' : 'concluida' });
+    renderJuntaDetalhe(id);
+  };
+  document.getElementById('j-del').onclick = async () => {
+    if (!confirm('Excluir esta junta?')) return;
+    try { await api.del('/api/juntas/' + id); toast('Junta excluída'); location.hash = '#juntas'; }
+    catch (e) { toast(e.message, true); }
+  };
+}
+
 async function renderServidores() {
   shell('<div class="empty">Carregando…</div>');
   const lista = await api.get('/api/servidores');
@@ -823,7 +959,10 @@ async function renderServidorDetalhe(id) {
       <h2 style="margin-top:4px">${esc(s.nome)}</h2>
       <div class="desc">${esc(s.cargo || '')} ${s.matricula ? '• Matrícula ' + esc(s.matricula) : ''} • ${s.processos.length} processo(s) • ${s.total_dias_afastado} dia(s) afastado</div>
     </div>
-    <a class="btn" href="/api/servidores/${id}/ppp" target="_blank" rel="noopener">🖨 Ficha / PPP</a></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn secondary" id="s-formar-junta">⚖️ Formar Junta</button>
+      <a class="btn" href="/api/servidores/${id}/ppp" target="_blank" rel="noopener">🖨 Ficha / PPP</a>
+    </div></div>
     <div class="detail-grid">
       <div>
         <div class="card"><div class="card-h">Ficha funcional
@@ -864,6 +1003,17 @@ async function renderServidorDetalhe(id) {
   };
   document.getElementById('s-salvar').onclick = salvarFicha;
   document.getElementById('s-salvar-2').onclick = salvarFicha;
+
+  // ⚖️ Formar Junta a partir deste servidor.
+  document.getElementById('s-formar-junta').onclick = async () => {
+    const r = await modal({ titulo: 'Formar junta médica', okLabel: 'Criar', corpo: `
+      <p class="muted">Cria uma junta para <b>${esc(s.nome)}</b>, já com o dossiê (afastamentos e processos).</p>
+      <div class="field"><label>Tipo</label><select name="tipo">${TIPOS_JUNTA.map((t) => `<option>${t}</option>`).join('')}</select></div>
+      <div class="field"><label>Data da reunião</label><input name="data_reuniao" type="date"></div>` });
+    if (!r) return;
+    try { const c = await api.post('/api/juntas', { servidor_id: id, ...r }); toast('Junta criada'); location.hash = `#junta/${c.id}`; }
+    catch (e) { toast(e.message, true); }
+  };
 
   // 🤖 Buscar ficha no SEI: abre o processo, tira print da ficha e OCR — sozinho.
   document.getElementById('s-ia-sei').onclick = async () => {
