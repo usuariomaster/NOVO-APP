@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contato e agendamento — MedTran | Exames de CNH em Nova Iguaçu</title>
+<meta name="description" content="Agende seu exame médico e psicológico de CNH na MedTran. Fale por WhatsApp, telefone ou preencha o formulário. Endereço, horários e localização em Nova Iguaçu/RJ.">
+<meta name="theme-color" content="#0b0518">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23ff2d95'/><stop offset='.5' stop-color='%237b2ff7'/><stop offset='1' stop-color='%2300e5ff'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23g)'/><path d='M50 26v48M26 50h48' stroke='white' stroke-width='11' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container nav">
+    <a class="brand" href="index.html" aria-label="MedTran início">
+      <span class="logo-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v16M4 12h16" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg></span>
+      <span>Med<b>Tran</b></span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">Início</a></li>
+      <li><a href="servicos.html">Serviços</a></li>
+      <li><a href="como-funciona.html">Como funciona</a></li>
+      <li><a href="sobre.html">A clínica</a></li>
+      <li><a href="contato.html" class="active">Contato</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a class="btn btn--primary" href="#agendar">Agendar exame</a>
+      <button class="nav-toggle" aria-label="Abrir menu" aria-expanded="false"><span></span></button>
+    </div>
+  </div>
+</header>
+
+<section class="hero" style="padding:96px 0 76px">
+  <span class="blob blob--p" style="width:320px;height:320px;top:-80px;left:-40px"></span>
+  <span class="blob blob--a" style="width:260px;height:260px;bottom:-100px;right:-40px;animation-delay:-4s;opacity:.4"></span>
+  <div class="container">
+    <div style="max-width:760px">
+      <span class="eyebrow eyebrow--light reveal in">Contato</span>
+      <h1 class="reveal in" style="font-size:clamp(2.3rem,5.5vw,3.8rem)">Vamos <span class="shine">agendar</span> seu exame?</h1>
+      <p class="lead reveal in" data-delay="1" style="color:var(--on-dark-soft)">Escolha o canal que preferir. Respondemos rápido e confirmamos tudo pelo WhatsApp.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Agendamento + contato -->
+<section class="section" id="agendar">
+  <div class="container">
+    <div class="hero-grid" style="align-items:start;gap:40px">
+      <!-- Form -->
+      <div class="reveal">
+        <div class="form-card">
+          <h2 style="font-size:1.7rem">Solicitar agendamento</h2>
+          <p class="muted">Preencha os dados e retornamos com o horário disponível.</p>
+          <form data-mock action="#" novalidate style="margin-top:10px">
+            <div class="form-row">
+              <div class="field"><label for="c-nome">Nome completo *</label><input id="c-nome" name="nome" type="text" placeholder="Seu nome" required></div>
+              <div class="field"><label for="c-tel">WhatsApp *</label><input id="c-tel" name="telefone" type="tel" placeholder="(21) 90000-0000" required></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="c-email">E-mail</label><input id="c-email" name="email" type="email" placeholder="voce@email.com"></div>
+              <div class="field"><label for="c-exame">Tipo de exame *</label>
+                <select id="c-exame" name="exame" required>
+                  <option value="" disabled selected>Selecione…</option>
+                  <option>Médico + Psicológico (1ª habilitação)</option>
+                  <option>Renovação de CNH</option>
+                  <option>Mudança / adição de categoria</option>
+                  <option>Atividade remunerada (EAR)</option>
+                  <option>Somente exame médico</option>
+                  <option>Somente exame psicológico</option>
+                  <option>Não sei / preciso de ajuda</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="c-dia">Melhor dia</label>
+                <select id="c-dia" name="dia">
+                  <option value="" disabled selected>Selecione…</option>
+                  <option>Segunda a sexta (manhã)</option>
+                  <option>Segunda a sexta (tarde)</option>
+                  <option>Segunda a sexta (noite)</option>
+                  <option>Sábado</option>
+                </select>
+              </div>
+              <div class="field"><label for="c-cat">Categoria da CNH</label>
+                <select id="c-cat" name="categoria">
+                  <option value="" disabled selected>Selecione…</option>
+                  <option>A (moto)</option>
+                  <option>B (carro)</option>
+                  <option>AB</option>
+                  <option>C / D / E (profissional)</option>
+                  <option>Ainda não tenho</option>
+                </select>
+              </div>
+            </div>
+            <div class="field"><label for="c-msg">Observações</label><textarea id="c-msg" name="mensagem" placeholder="Conte qualquer detalhe que ajude no agendamento…"></textarea></div>
+            <button class="btn btn--primary btn--lg btn--block" type="submit">Enviar solicitação</button>
+            <div class="form-ok" data-msg="recebemos sua solicitação! Em instantes confirmamos o horário pelo WhatsApp."><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span></span></div>
+            <p class="form-note" style="margin-top:12px">* Campos obrigatórios. Seus dados são usados apenas para o agendamento.</p>
+          </form>
+        </div>
+      </div>
+
+      <!-- Info -->
+      <div class="reveal" data-delay="1">
+        <div class="info-list">
+          <div class="info-item">
+            <div class="ii"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.8 4.9-1.3A10 10 0 1 0 12 2Zm5.9 14.1c-.2.7-1.2 1.3-1.9 1.4-.5.1-1.1.2-3.4-.7-2.9-1.2-4.7-4.1-4.9-4.3-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 .9-2.3.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.5.7 1.8.8 1.9.1.1.1.3 0 .5-.1.2-.2.4-.3.5l-.4.5c-.1.1-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.6-.1.2-.2.7-.8.9-1.1.2-.3.4-.2.6-.1.2.1 1.5.7 1.7.9.2.1.4.2.4.3.1.1.1.6-.1 1.3Z"/></svg></div>
+            <div><h4>WhatsApp</h4><p><a href="https://wa.me/5521900000000" target="_blank" rel="noopener">(21) 90000-0000</a> — resposta rápida</p></div>
+          </div>
+          <div class="info-item">
+            <div class="ii"><svg viewBox="0 0 24 24" fill="none"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.4 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
+            <div><h4>Telefone</h4><p><a href="tel:+552133330000">(21) 3333-0000</a></p></div>
+          </div>
+          <div class="info-item">
+            <div class="ii"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="#fff" stroke-width="2"/><path d="m3 7 9 6 9-6" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
+            <div><h4>E-mail</h4><p><a href="mailto:contato@medtran.com.br">contato@medtran.com.br</a></p></div>
+          </div>
+          <div class="info-item">
+            <div class="ii"><svg viewBox="0 0 24 24" fill="none"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="#fff" stroke-width="2"/></svg></div>
+            <div><h4>Endereço</h4><p>Av. Amaral Peixoto, 000 — Centro<br>Nova Iguaçu / RJ · CEP 26000-000</p></div>
+          </div>
+          <div class="info-item">
+            <div class="ii"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#fff" stroke-width="2"/><path d="M12 7v5l3 2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div><h4>Horário de atendimento</h4><p>Seg. a sex.: 8h às 20h<br>Sábado: 8h às 13h</p></div>
+          </div>
+        </div>
+
+        <div class="map-embed" style="margin-top:24px">
+          <div>
+            <svg viewBox="0 0 24 24" fill="none" style="width:40px;height:40px;margin:0 auto 10px;color:var(--purple)"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="2"/></svg>
+            <b>Centro de Nova Iguaçu / RJ</b><br>
+            <a class="btn btn--dark" style="margin-top:14px" href="https://www.google.com/maps/search/?api=1&query=Centro+Nova+Iguacu+RJ" target="_blank" rel="noopener">Abrir no Google Maps</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Faixa WhatsApp -->
+<section class="section section--tight">
+  <div class="container">
+    <div class="cta-final reveal">
+      <span class="blob blob--c" style="width:240px;height:240px;top:-40px;left:12%;animation-delay:-2s"></span>
+      <span class="blob blob--m" style="width:240px;height:240px;bottom:-60px;right:12%;animation-delay:-5s"></span>
+      <span class="eyebrow eyebrow--light">Prefere conversar?</span>
+      <h2>Chama a gente no WhatsApp</h2>
+      <p>Tira suas dúvidas e agenda na hora, direto com nossa equipe.</p>
+      <div class="hero-actions">
+        <a class="btn btn--primary btn--lg" href="https://wa.me/5521900000000" target="_blank" rel="noopener">Abrir WhatsApp</a>
+        <a class="btn btn--ghost btn--lg" href="tel:+552133330000">Ligar agora</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="index.html"><span class="logo-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v16M4 12h16" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg></span><span>Med<b>Tran</b></span></a>
+        <p style="max-width:34ch">Clínica credenciada DETRAN para exames médicos e psicológicos de habilitação.</p>
+      </div>
+      <div><h4>Serviços</h4><ul><li><a href="servicos.html#medico">Exame médico</a></li><li><a href="servicos.html#psicologico">Exame psicológico</a></li><li><a href="servicos.html#renovacao">Renovação de CNH</a></li><li><a href="servicos.html#ear">Atividade remunerada</a></li></ul></div>
+      <div><h4>Institucional</h4><ul><li><a href="sobre.html">A clínica</a></li><li><a href="como-funciona.html">Como funciona</a></li><li><a href="index.html#precos">Preços</a></li><li><a href="contato.html">Contato</a></li></ul></div>
+      <div><h4>Contato</h4><ul><li><a href="tel:+552133330000">(21) 3333-0000</a></li><li><a href="https://wa.me/5521900000000" target="_blank" rel="noopener">WhatsApp: (21) 90000-0000</a></li><li><a href="mailto:contato@medtran.com.br">contato@medtran.com.br</a></li><li>Av. Amaral Peixoto, 000 — Centro<br>Nova Iguaçu / RJ</li></ul></div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> MedTran Clínica de Exames. Todos os direitos reservados.</span>
+      <span>CNPJ 00.000.000/0001-00 · Credenciada DETRAN-RJ</span>
+    </div>
+  </div>
+</footer>
+
+<a class="wa-float" href="https://wa.me/5521900000000" target="_blank" rel="noopener" aria-label="Falar no WhatsApp">
+  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.8 4.9-1.3A10 10 0 1 0 12 2Zm5.9 14.1c-.2.7-1.2 1.3-1.9 1.4-.5.1-1.1.2-3.4-.7-2.9-1.2-4.7-4.1-4.9-4.3-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 .9-2.3.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.5.7 1.8.8 1.9.1.1.1.3 0 .5-.1.2-.2.4-.3.5l-.4.5c-.1.1-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.6-.1.2-.2.7-.8.9-1.1.2-.3.4-.2.6-.1.2.1 1.5.7 1.7.9.2.1.4.2.4.3.1.1.1.6-.1 1.3Z"/></svg>
+</a>
+
+<script src="js/main.js"></script>
+</body>
+</html>
