@@ -1,0 +1,32 @@
+<?php require_once '../conf.php'; ?>
+<html><body>
+<div id="lista"></div>
+<script>
+function imprimirPeriodo(){
+  var w = window.open('','_blank');
+  w.document.write('<html><head><title>Periodo</title></head><body>');
+  w.document.write('<script>window.print();</script>');
+  w.document.write('</body></html>');
+}
+function exportarPeriodo(){ console.log('csv'); }
+const STATUS_PT = { agendado:'Agendado', faltou:'Falta', atendido:'Atendido' };
+const STATUS_COR = { agendado:'#888', faltou:'#c00', atendido:'#0a0' };
+const alias = { falta:'faltou', Falta:'faltou' };
+function aplicarFiltroPeriodo(){
+  var cont = {};
+  var ordem = ['agendado','falta','atendido'];
+  document.querySelectorAll('#lista tr').forEach(function(tr){
+    var st = alias[tr.getAttribute('data-status')] || tr.getAttribute('data-status');
+    cont[st] = (cont[st]||0) + 1;
+  });
+  ordem.forEach(function(k){ chipPeriodo(k, cont[k]||0); });
+}
+function filtrarPeriodoStatus(st){
+  document.querySelectorAll('#lista tr').forEach(function(tr){
+    tr.style.display = (!st || tr.getAttribute('data-status') === st) ? '' : 'none';
+  });
+}
+function chipPeriodo(k, n){ console.log(k, n); }
+function renderPeriodoOverlay(){ console.log('overlay'); }
+</script>
+</body></html>
