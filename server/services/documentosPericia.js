@@ -2,7 +2,7 @@
 // Documentos oficiais da Perícia (reproduzem os modelos reais):
 //  - BIM (Boletim de Inspeção Médica) — formulário interno da perícia
 //  - Comprovante ao servidor — resposta enviada ao servidor, com o
-//    texto-padrão legal (Resolução 2.382/2024, reconsideração via SEMAT…)
+//    texto-padrão legal (Resolução CFM 2.381/2024, reconsideração via SEMAT…)
 // ============================================================
 import { getConfig } from '../db.js';
 import { timbreHTML, TIMBRE_CSS } from './timbre.js';
@@ -13,9 +13,9 @@ const chk = (v) => (v ? '☑' : '☐');
 
 // Texto-padrão do comprovante (editável em configurações; default = modelo real).
 export const OBS_PADRAO_DEFAULT = [
-  'Os atestados fora do prazo e/ou padrão da RESOLUÇÃO 2.382/2024 e da portaria 034/2019 – SEMUS não serão considerados;',
+  'Os atestados fora do prazo e/ou padrão da RESOLUÇÃO 2.381/2024 CFM e da portaria 034/2019 – SEMUS não serão considerados;',
   'Cabe ao servidor acompanhar diariamente o andamento do seu pedido;',
-  'Caso o servidor não concorde com a decisão da perícia médica, deverá ser aberto um processo de reconsideração junto à Secretaria de Administração e Tecnologia - SEMAT, onde deverá ser anexado laudo médico completo conforme a RESOLUÇÃO 1.658/2002, 2.381/2024 e 2.382/2024; vale ressaltar que o servidor(a) permanecerá descoberto do abono de faltas durante o trâmite do processo;',
+  'Caso o servidor não concorde com a decisão da perícia médica, deverá ser aberto um processo de reconsideração junto à Secretaria de Administração e Tecnologia - SEMAT, onde deverá ser anexado laudo médico completo conforme a RESOLUÇÃO CFM 2.381/2024 e 2.430/2025; vale ressaltar que o servidor(a) permanecerá descoberto do abono de faltas durante o trâmite do processo;',
   'O agendamento de perícia médica presencial é EXCLUSIVAMENTE solicitado pelo perito médico e confirmado por mensagem de texto através do WhatsApp: (21) 96649-5532 (não responderemos ligação, SMS e áudio), ou do e-mail: periciamedica@novaiguacu.rj.gov.br;',
   'O horário dos agendamentos dos peritos médicos da Junta Médica Oficial é de 08h às 12h de segunda a sexta-feira. O setor administrativo funciona de 8h às 17h mediante agendamento prévio por WhatsApp ou e-mail.',
 ];
