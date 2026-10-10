@@ -1021,16 +1021,23 @@ async function renderServidorDetalhe(id) {
   </div>
   ${s.prontuario ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"><div class="muted" style="font-weight:600;margin-bottom:4px">Prontuário / resumo clínico</div><div style="white-space:pre-wrap">${esc(s.prontuario)}</div></div>` : ''}`;
 
-  // ---- Licenças (histórico cronológico de afastamentos com período) ----
-  const lics = s.afastamentos.filter((a) => a.data_inicio)
-    .sort((a, b) => String(b.data_inicio).localeCompare(String(a.data_inicio)));
-  const licencas = lics.length ? `<table><thead><tr><th>Período</th><th>Dias</th><th>CID</th><th>Natureza / conclusão</th></tr></thead>
-    <tbody>${lics.map((a) => `<tr>
-      <td>${dataBR(a.data_inicio)}${a.data_fim ? ' a ' + dataBR(a.data_fim) : ''}</td>
-      <td>${a.dias || '—'}</td>
-      <td class="num-proc">${esc(a.cid || '—')}${a.cid2 ? '/' + esc(a.cid2) : ''}</td>
-      <td>${esc(a.natureza || a.tipo || '—')}${a.conclusao ? ' • ' + esc(a.conclusao) : ''}</td></tr>`).join('')}</tbody></table>
-    <div class="muted" style="font-size:12px;margin-top:6px">Total: ${s.total_dias_afastado} dia(s) em ${lics.length} período(s).</div>`
+  // ---- Licenças: cadeia de prorrogações e licença ininterrupta (calculada no servidor — 10/10/2026) ----
+  const ROT = { INICIAL: 'Licença inicial', PRORROGACAO: 'Prorrogação', PRORROGACAO_TARDIA: 'Prorrogação tardia' };
+  const cad = (s.cadeia_afast || []).slice().reverse();
+  const resumoTipo = (r, nome) => !r || !r.n ? `<div><b>${nome}:</b> <span class="muted">sem afastamento concedido</span></div>`
+    : `<div><b>${nome}:</b> ${esc(r.situacao)} • último dia ${dataBR(r.ultimo_fim)} • ininterrupta <b>${r.ininterrupto} dia(s)</b> • próxima prorrogação em ${dataBR(r.prorrogacao_normal_inicia)} • tardia até ${dataBR(r.tardia_ate)}</div>`;
+  const licencas = cad.length ? `<div style="margin-bottom:8px;font-size:13px">${resumoTipo((s.resumo_afast || {}).proprio, 'Saúde do próprio')}${resumoTipo((s.resumo_afast || {}).familia, 'Pessoa da família')}</div>
+    <table><thead><tr><th>Classificação</th><th>Pedido</th><th>Período efetivo</th><th>Dias</th><th>Descoberto antes</th><th>Ininterrupta</th><th>CID</th><th>Conclusão</th></tr></thead>
+    <tbody>${cad.map((a) => `<tr style="${a.conta ? '' : 'opacity:.55;text-decoration:line-through'}">
+      <td><b>${ROT[a.classificacao] || a.classificacao}</b>${a.tipo === 'familia' ? ' <span class="muted">(família)</span>' : ''}</td>
+      <td>${dataBR(a.pedido)}</td>
+      <td>${a.inicio !== a.pedido ? `<span style="background:#fff3d6;border-radius:4px;padding:0 3px" title="Início ajustado para o dia seguinte ao último dia do anterior">${dataBR(a.inicio)}</span>` : dataBR(a.inicio)} a ${dataBR(a.fim)}</td>
+      <td>${a.dias}</td>
+      <td>${a.intervalo == null ? '—' : a.intervalo + ' dia(s)'}</td>
+      <td>${a.ininterrupto_anterior} → <b>${a.ininterrupto_total}</b></td>
+      <td class="num-proc">${esc(a.cid || '—')}</td>
+      <td>${esc(a.conclusao || '—')}</td></tr>`).join('')}</tbody></table>
+    <div class="muted" style="font-size:12px;margin-top:6px">Prorrogação começa sempre no dia seguinte ao último dia do anterior; até 60 dias depois = prorrogação tardia (ininterrupta recomeça); acima disso = nova licença inicial. Negados/diligência não contam.</div>`
     : '<span class="muted">Nenhuma licença/afastamento com período registrado.</span>';
 
   // ---- Comentários (anotações livres da equipe, tipo cesar.ia) ----

@@ -10,6 +10,7 @@ import { descriptografar } from '../sei/crypto.js';
 import { capturarFichaNoSei } from '../sei/detail.js';
 import { extrairFichaDeArquivos } from '../services/ia.js';
 import { timbreHTML, TIMBRE_CSS } from '../services/timbre.js';
+import { calcular as calcularAfast, resumo as resumoAfast } from '../services/afastamentosMotor.js';
 import { htmlBIM, htmlComprovanteServidor } from '../services/documentosPericia.js';
 
 const router = Router();
@@ -61,6 +62,9 @@ router.get('/:id', (req, res) => {
   s.comentarios = db.prepare('SELECT id, texto, autor, criado_em FROM servidor_comentarios WHERE servidor_id = ? ORDER BY id DESC').all(s.id);
   // total de dias afastado
   s.total_dias_afastado = s.afastamentos.reduce((t, a) => t + (a.dias || 0), 0);
+  // 10/10/2026 — cadeia de prorrogações e licença ininterrupta (motor único, mesmas regras do cesar.ia)
+  s.cadeia_afast = calcularAfast(s.afastamentos);
+  s.resumo_afast = { proprio: resumoAfast(s.cadeia_afast, 'proprio'), familia: resumoAfast(s.cadeia_afast, 'familia') };
   res.json(s);
 });
 
